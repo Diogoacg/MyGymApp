@@ -5,92 +5,100 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  Alert,
   RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { supabase } from "../../lib/supabaseClient";
 import Button from "../../components/common/Button";
 import LoadingSpinner from "../../components/common/LoadingSpinner";
+import Toast from "../../components/common/Toast";
+import { ConfirmModal } from "../../components/common/Modal";
 import { colors } from "../../styles/colors";
 import { typography } from "../../styles/typography";
 import { globalStyles } from "../../styles/globalStyles";
+import useWorkouts from "../../hooks/useWorkouts";
+import useToast from "../../hooks/useToast";
 
 export default function WorkoutListScreen({ navigation }) {
-  const [workouts, setWorkouts] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [workoutToDelete, setWorkoutToDelete] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const { workouts, loading, loadWorkouts, deleteWorkout } = useWorkouts();
+  const { toast, showSuccess, showError, hideToast } = useToast();
 
   useFocusEffect(
     useCallback(() => {
+      console.log("📱 WorkoutListScreen focused, loading workouts...");
       loadWorkouts();
-    }, [])
+    }, [loadWorkouts])
   );
 
-  async function loadWorkouts() {
+  const handleDeleteWorkout = (workout) => {
+    console.log("🗑️ Delete workout requested:", {
+      id: workout.id,
+      name: workout.name,
+    });
+    setWorkoutToDelete(workout);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDeleteWorkout = async () => {
+    if (!workoutToDelete) return;
+
+    console.log("🗑️ Confirming delete for workout:", workoutToDelete.id);
+    setShowDeleteModal(false);
+    setIsDeleting(true);
+
     try {
-      const { data, error } = await supabase
-        .from("workouts")
-        .select(
-          `
-          *,
-          exercises (
-            id,
-            name,
-            sets,
-            reps,
-            weight_kg
-          )
-        `
-        )
-        .order("date", { ascending: false })
-        .order("created_at", { ascending: false });
+      const result = await deleteWorkout(workoutToDelete.id);
+      console.log("🗑️ Delete result:", result);
 
-      if (error) throw error;
-      setWorkouts(data || []);
+      if (result.error) {
+        console.log("❌ Delete failed:", result.error);
+        showError(
+          typeof result.error === "string"
+            ? result.error
+            : result.error.message || "Não foi possível apagar o treino."
+        );
+      } else {
+        console.log("✅ Delete successful");
+        showSuccess("Treino apagado com sucesso!");
+        // O loadWorkouts já é chamado automaticamente no hook useWorkouts
+      }
     } catch (error) {
-      Alert.alert("Erro", "Não foi possível carregar os treinos.");
-      console.error("Error loading workouts:", error);
+      console.error("💥 Unexpected error during delete:", error);
+      showError("Erro inesperado ao apagar o treino.");
     } finally {
-      setLoading(false);
+      setIsDeleting(false);
+      setWorkoutToDelete(null);
     }
-  }
+  };
 
-  async function deleteWorkout(workoutId) {
-    Alert.alert("Confirmar", "Tem certeza que deseja apagar este treino?", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Apagar",
-        style: "destructive",
-        onPress: async () => {
-          const { error } = await supabase
-            .from("workouts")
-            .delete()
-            .eq("id", workoutId);
-
-          if (error) {
-            Alert.alert("Erro", "Não foi possível apagar o treino.");
-          } else {
-            loadWorkouts();
-          }
-        },
-      },
-    ]);
-  }
+  const cancelDeleteWorkout = () => {
+    console.log("🚫 Delete cancelled");
+    setShowDeleteModal(false);
+    setWorkoutToDelete(null);
+  };
 
   const onRefresh = useCallback(async () => {
+    console.log("🔄 Manual refresh triggered");
     setRefreshing(true);
     await loadWorkouts();
     setRefreshing(false);
-  }, []);
+  }, [loadWorkouts]);
 
   const renderWorkoutItem = ({ item }) => (
     <TouchableOpacity
       style={[globalStyles.card, styles.workoutCard]}
-      onPress={() =>
-        navigation.navigate("WorkoutDetail", { workoutId: item.id })
-      }
+      onPress={() => {
+        console.log("👆 Workout card pressed:", {
+          id: item.id,
+          name: item.name,
+        });
+        navigation.navigate("WorkoutDetail", { workoutId: item.id });
+      }}
     >
       <View style={styles.workoutHeader}>
         <View style={styles.workoutInfo}>
@@ -98,7 +106,7 @@ export default function WorkoutListScreen({ navigation }) {
             {item.name || "Treino sem nome"}
           </Text>
           <Text style={styles.workoutDate}>
-            {new Date(item.date).toLocaleDateString("pt-PT", {
+            {new Date(item.date + "T00:00:00").toLocaleDateString("pt-PT", {
               weekday: "long",
               day: "numeric",
               month: "long",
@@ -110,9 +118,14 @@ export default function WorkoutListScreen({ navigation }) {
         </View>
         <TouchableOpacity
           style={styles.deleteButton}
-          onPress={() => deleteWorkout(item.id)}
+          onPress={() => handleDeleteWorkout(item)}
+          disabled={isDeleting}
         >
-          <Ionicons name="trash-outline" size={20} color={colors.error} />
+          <Ionicons
+            name="trash-outline"
+            size={20}
+            color={isDeleting ? colors.gray?.[400] : colors.error}
+          />
         </TouchableOpacity>
       </View>
 
@@ -140,30 +153,74 @@ export default function WorkoutListScreen({ navigation }) {
     </TouchableOpacity>
   );
 
+  console.log("📋 WorkoutListScreen render:", {
+    loading,
+    workoutsCount: workouts.length,
+    refreshing,
+    isDeleting,
+    hasWorkoutToDelete: !!workoutToDelete,
+  });
+
   if (loading) {
-    return <LoadingSpinner />;
+    console.log("⏳ Showing loading spinner");
+    return <LoadingSpinner text="A carregar treinos..." />;
   }
 
   return (
     <View style={styles.container}>
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        duration={toast.duration}
+        onHide={hideToast}
+        position="top"
+      />
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        visible={showDeleteModal}
+        onClose={cancelDeleteWorkout}
+        onConfirm={confirmDeleteWorkout}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja apagar o treino "${
+          workoutToDelete?.name || "este treino"
+        }"? Esta ação não pode ser desfeita.`}
+        confirmText="Apagar"
+        cancelText="Cancelar"
+        type="error"
+        confirmButtonStyle={{ backgroundColor: colors.error }}
+        isLoading={isDeleting}
+      />
+
       <View style={styles.header}>
         <Button
           title="Novo Treino"
-          onPress={() => navigation.navigate("AddWorkout")}
+          onPress={() => {
+            console.log("➕ New workout button pressed");
+            navigation.navigate("AddWorkout");
+          }}
           style={styles.addButton}
         />
       </View>
 
       {workouts.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="fitness-outline" size={64} color={colors.gray[400]} />
+          <Ionicons
+            name="fitness-outline"
+            size={64}
+            color={colors.gray?.[400]}
+          />
           <Text style={styles.emptyTitle}>Nenhum treino registado</Text>
           <Text style={styles.emptySubtitle}>
             Comece a registar os seus treinos para acompanhar o progresso
           </Text>
           <Button
             title="Criar Primeiro Treino"
-            onPress={() => navigation.navigate("AddWorkout")}
+            onPress={() => {
+              console.log("🏁 First workout button pressed");
+              navigation.navigate("AddWorkout");
+            }}
             style={styles.firstWorkoutButton}
           />
         </View>
@@ -212,21 +269,21 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   workoutName: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.bold,
+    fontSize: typography?.sizes?.lg || 18,
+    fontWeight: typography?.weights?.bold || "bold",
     color: colors.text,
     marginBottom: 4,
   },
   workoutDate: {
-    fontSize: typography.sizes.sm,
+    fontSize: typography?.sizes?.sm || 14,
     color: colors.textSecondary,
     textTransform: "capitalize",
     marginBottom: 4,
   },
   exerciseCount: {
-    fontSize: typography.sizes.sm,
+    fontSize: typography?.sizes?.sm || 14,
     color: colors.primary,
-    fontWeight: typography.weights.medium,
+    fontWeight: typography?.weights?.medium || "500",
   },
   deleteButton: {
     padding: 5,
@@ -235,18 +292,18 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   exercisePreviewText: {
-    fontSize: typography.sizes.sm,
+    fontSize: typography?.sizes?.sm || 14,
     color: colors.textSecondary,
     marginBottom: 2,
   },
   moreExercises: {
-    fontSize: typography.sizes.sm,
+    fontSize: typography?.sizes?.sm || 14,
     color: colors.primary,
-    fontWeight: typography.weights.medium,
+    fontWeight: typography?.weights?.medium || "500",
     marginTop: 4,
   },
   workoutNotes: {
-    fontSize: typography.sizes.sm,
+    fontSize: typography?.sizes?.sm || 14,
     color: colors.textSecondary,
     fontStyle: "italic",
     marginTop: 5,
@@ -258,15 +315,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
   },
   emptyTitle: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.bold,
+    fontSize: typography?.sizes?.xl || 20,
+    fontWeight: typography?.weights?.bold || "bold",
     color: colors.text,
     marginTop: 20,
     marginBottom: 10,
     textAlign: "center",
   },
   emptySubtitle: {
-    fontSize: typography.sizes.md,
+    fontSize: typography?.sizes?.md || 16,
     color: colors.textSecondary,
     textAlign: "center",
     marginBottom: 30,
