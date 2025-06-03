@@ -369,7 +369,7 @@ export default function AddWorkoutScreen({ navigation }) {
                     Nenhum exercício adicionado
                   </Text>
                   <Text style={styles.noExercisesSubtext}>
-                    Toque em "Adicionar" para começar
+                    Toque em Adicionar para começar
                   </Text>
                 </View>
               )}

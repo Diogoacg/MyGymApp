@@ -1,150 +1,431 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { supabase } from "../../lib/supabaseClient";
 import LoadingSpinner from "../../components/common/LoadingSpinner";
 import Button from "../../components/common/Button";
+import Toast from "../../components/common/Toast";
+import { ConfirmModal } from "../../components/common/Modal";
 import { colors } from "../../styles/colors";
 import { typography } from "../../styles/typography";
 import { globalStyles } from "../../styles/globalStyles";
+import useWorkouts from "../../hooks/useWorkouts";
+import useToast from "../../hooks/useToast";
 
 export default function WorkoutDetailScreen({ route, navigation }) {
-  const { workoutId } = route.params;
+  console.log("🔥 WorkoutDetailScreen RENDER START", {
+    routeParams: route.params,
+    workoutId: route.params?.workoutId,
+  });
+
+  const workoutIdFromParams = route.params?.workoutId;
+
   const [workout, setWorkout] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loadingDetails, setLoadingDetails] = useState(true);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isDuplicating, setIsDuplicating] = useState(false);
+
+  // Estados para modais
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+
+  const { getWorkoutById, deleteWorkout, createWorkout, userId } =
+    useWorkouts();
+  const { toast, showSuccess, showError, hideToast } = useToast();
+
+  console.log("🔍 Current state:", {
+    workout: workout ? { id: workout.id, name: workout.name } : null,
+    loadingDetails,
+    isDeleting,
+    isDuplicating,
+    userId,
+    workoutIdFromParams,
+  });
+
+  const safeGoBack = useCallback(() => {
+    console.log("🔙 safeGoBack called");
+    if (navigation.canGoBack()) {
+      console.log("   - Going back");
+      navigation.goBack();
+    } else {
+      console.log("   - Replacing with WorkoutList");
+      navigation.replace("WorkoutList");
+    }
+  }, [navigation]);
+
+  const loadWorkoutDetails = useCallback(async () => {
+    console.log("📥 loadWorkoutDetails called", {
+      workoutIdFromParams,
+      userId,
+      hasWorkout: !!workout,
+    });
+
+    if (!workoutIdFromParams) {
+      console.log("❌ No workoutIdFromParams");
+      showError("ID do treino inválido.");
+      setLoadingDetails(false);
+      safeGoBack();
+      return;
+    }
+
+    if (!userId) {
+      console.log("❌ No userId - cannot fetch");
+      return;
+    }
+
+    console.log("📡 Fetching workout details...");
+    setLoadingDetails(true);
+    try {
+      const result = await getWorkoutById(workoutIdFromParams);
+      console.log("📡 getWorkoutById result:", result);
+
+      if (result.error) {
+        console.log("❌ Error fetching workout:", result.error);
+        showError(
+          typeof result.error === "string"
+            ? result.error
+            : result.error.message ||
+                "Não foi possível carregar os detalhes do treino."
+        );
+        safeGoBack();
+        return;
+      }
+      if (result.data) {
+        console.log("✅ Workout data received:", {
+          id: result.data.id,
+          name: result.data.name,
+          exercisesCount: result.data.exercises?.length || 0,
+        });
+        setWorkout(result.data);
+      } else {
+        console.log("❌ No workout data received");
+        showError("Detalhes do treino não encontrados.");
+        safeGoBack();
+      }
+    } catch (error) {
+      console.log("💥 Unexpected error:", error);
+      showError("Erro inesperado ao carregar o treino.");
+      safeGoBack();
+    } finally {
+      console.log("🏁 loadWorkoutDetails finished");
+      setLoadingDetails(false);
+    }
+  }, [workoutIdFromParams, getWorkoutById, showError, safeGoBack, userId]);
 
   useEffect(() => {
-    loadWorkoutDetails();
-  }, [workoutId]);
+    console.log("🔄 useEffect triggered", {
+      userId,
+      workoutIdFromParams,
+      currentWorkoutId: workout?.id,
+      loadingDetails,
+    });
 
-  async function loadWorkoutDetails() {
-    try {
-      const { data, error } = await supabase
-        .from("workouts")
-        .select(
-          `
-          *,
-          exercises (
-            id,
-            name,
-            sets,
-            reps,
-            weight_kg,
-            notes,
-            created_at
-          )
-        `
-        )
-        .eq("id", workoutId)
-        .single();
-
-      if (error) throw error;
-      setWorkout(data);
-    } catch (error) {
-      Alert.alert("Erro", "Não foi possível carregar os detalhes do treino.");
-      navigation.goBack();
-    } finally {
-      setLoading(false);
+    if (!workoutIdFromParams) {
+      console.log("   - No workoutIdFromParams");
+      showError("ID do treino não fornecido.");
+      setLoadingDetails(false);
+      safeGoBack();
+      return;
     }
-  }
 
-  async function deleteWorkout() {
-    Alert.alert("Confirmar", "Tem certeza que deseja apagar este treino?", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Apagar",
-        style: "destructive",
-        onPress: async () => {
-          const { error } = await supabase
-            .from("workouts")
-            .delete()
-            .eq("id", workoutId);
+    if (userId) {
+      if (!workout || workout.id !== workoutIdFromParams) {
+        console.log("   - Loading workoutDetails");
+        loadWorkoutDetails();
+      } else {
+        console.log("   - Workout already loaded correctly");
+        setLoadingDetails(false);
+      }
+    } else {
+      console.log("   - Waiting for userId");
+      if (!loadingDetails) {
+        setLoadingDetails(true);
+      }
+    }
+  }, [
+    userId,
+    workoutIdFromParams,
+    loadWorkoutDetails,
+    showError,
+    safeGoBack,
+    workout,
+  ]);
 
-          if (error) {
-            Alert.alert("Erro", "Não foi possível apagar o treino.");
-          } else {
-            navigation.goBack();
-          }
-        },
-      },
-    ]);
-  }
+  const handleDeleteWorkout = () => {
+    console.log("🗑️ handleDeleteWorkout called");
+    console.log("🗑️ Current workout state:", {
+      hasWorkout: !!workout,
+      workoutId: workout?.id,
+      workoutName: workout?.name,
+    });
 
-  const renderExercise = (exercise, index) => (
-    <View key={exercise.id} style={[globalStyles.card, styles.exerciseCard]}>
-      <View style={styles.exerciseHeader}>
-        <Text style={styles.exerciseName}>{exercise.name}</Text>
-        <TouchableOpacity
-          onPress={() =>
-            navigation.navigate("EditExercise", {
-              exerciseId: exercise.id,
-              workoutId: workoutId,
-            })
-          }
-          style={styles.editButton}
-        >
-          <Ionicons name="create-outline" size={20} color={colors.primary} />
-        </TouchableOpacity>
-      </View>
+    if (!workout) {
+      console.log("❌ No workout available - exiting");
+      return;
+    }
 
-      <View style={styles.exerciseStats}>
-        {exercise.sets && (
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Séries</Text>
-            <Text style={styles.statValue}>{exercise.sets}</Text>
-          </View>
-        )}
-        {exercise.reps && (
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Repetições</Text>
-            <Text style={styles.statValue}>{exercise.reps}</Text>
-          </View>
-        )}
-        {exercise.weight_kg && (
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Peso</Text>
-            <Text style={styles.statValue}>{exercise.weight_kg}kg</Text>
-          </View>
-        )}
-      </View>
+    console.log("🗑️ Showing delete confirmation modal...");
+    setShowDeleteModal(true);
+  };
 
-      {exercise.notes && (
-        <Text style={styles.exerciseNotes}>{exercise.notes}</Text>
-      )}
-    </View>
-  );
+  const confirmDeleteWorkout = async () => {
+    console.log("🗑️ Delete confirmed, processing...");
+    console.log("🗑️ About to delete workout with ID:", workoutIdFromParams);
 
-  if (loading) {
-    return <LoadingSpinner />;
-  }
+    setShowDeleteModal(false);
+    setIsDeleting(true);
 
-  if (!workout) {
+    try {
+      const result = await deleteWorkout(workoutIdFromParams);
+      console.log("🗑️ Delete result received:", result);
+
+      if (result.error) {
+        console.log("❌ Delete failed with error:", result.error);
+        showError(
+          typeof result.error === "string"
+            ? result.error
+            : result.error.message || "Não foi possível apagar o treino."
+        );
+      } else {
+        console.log("✅ Delete successful");
+        showSuccess("Treino apagado com sucesso!");
+        setTimeout(() => {
+          console.log("🔙 Navigating back after successful delete");
+          safeGoBack();
+        }, 1000);
+      }
+    } catch (error) {
+      console.error("💥 Unexpected error during delete:", error);
+      showError("Erro inesperado ao apagar o treino.");
+    } finally {
+      console.log("🏁 Setting isDeleting to false");
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDuplicateWorkout = () => {
+    console.log("📋 handleDuplicateWorkout called");
+    if (!workout) return;
+
+    console.log("📋 Showing duplicate confirmation modal...");
+    setShowDuplicateModal(true);
+  };
+
+  const confirmDuplicateWorkout = async () => {
+    console.log("📋 Duplicate confirmed, processing...");
+
+    setShowDuplicateModal(false);
+    setIsDuplicating(true);
+
+    try {
+      const newWorkoutData = {
+        name: `${workout.name || "Treino"} (Cópia)`,
+        date: new Date().toISOString().split("T")[0],
+        notes: workout.notes || "",
+      };
+
+      const exercisesToDuplicate =
+        workout.exercises?.map((exercise) => ({
+          name: exercise.name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          weight_kg: exercise.weight_kg,
+          notes: exercise.notes || "",
+        })) || [];
+
+      console.log("📋 Creating duplicate with:", {
+        newWorkoutData,
+        exercisesCount: exercisesToDuplicate.length,
+      });
+
+      const result = await createWorkout(newWorkoutData, exercisesToDuplicate);
+
+      console.log("📋 Duplicate result:", result);
+
+      if (result.error) {
+        throw typeof result.error === "string"
+          ? new Error(result.error)
+          : result.error;
+      }
+
+      showSuccess("Treino duplicado com sucesso! 🎉");
+      setTimeout(() => {
+        if (result.data && result.data.id) {
+          console.log("📋 Navigating to duplicated workout:", result.data.id);
+          navigation.replace("WorkoutDetail", {
+            workoutId: result.data.id,
+          });
+        } else {
+          console.log("📋 No workout ID, going back");
+          safeGoBack();
+        }
+      }, 1000);
+    } catch (error) {
+      console.log("💥 Duplicate error:", error);
+      showError(error.message || "Não foi possível duplicar o treino.");
+    } finally {
+      setIsDuplicating(false);
+    }
+  };
+
+  const renderExercise = (exercise, index) => {
+    console.log("🏋️ Rendering exercise:", {
+      exerciseId: exercise.id,
+      exerciseName: exercise.name,
+      index,
+    });
+
     return (
-      <View style={styles.errorContainer}>
-        <Text style={styles.errorText}>Treino não encontrado</Text>
+      <View
+        key={exercise.id || index}
+        style={[globalStyles.card, styles.exerciseCard]}
+      >
+        <View style={styles.exerciseHeader}>
+          <Text style={styles.exerciseNameText}>
+            {exercise.name || "Exercício sem nome"}
+          </Text>
+          <TouchableOpacity
+            onPress={() => {
+              console.log("✏️ Edit exercise pressed:", {
+                exerciseId: exercise.id,
+                workoutId: workoutIdFromParams,
+              });
+              navigation.navigate("EditExercise", {
+                exerciseId: exercise.id,
+                workoutId: workoutIdFromParams,
+              });
+            }}
+            style={styles.editButton}
+            disabled={isDeleting || isDuplicating}
+          >
+            <Ionicons name="create-outline" size={22} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.exerciseStats}>
+          {exercise.sets !== null && exercise.sets !== undefined && (
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Séries</Text>
+              <Text style={styles.statValue}>{exercise.sets}</Text>
+            </View>
+          )}
+          {exercise.reps !== null && exercise.reps !== undefined && (
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Reps</Text>
+              <Text style={styles.statValue}>{exercise.reps}</Text>
+            </View>
+          )}
+          {exercise.weight_kg !== null && exercise.weight_kg !== undefined && (
+            <View style={styles.statItem}>
+              <Text style={styles.statLabel}>Peso</Text>
+              <Text style={styles.statValue}>{exercise.weight_kg}kg</Text>
+            </View>
+          )}
+        </View>
+
+        {exercise.notes && (
+          <Text style={styles.exerciseNotes}>{exercise.notes}</Text>
+        )}
+      </View>
+    );
+  };
+
+  console.log("🎨 About to render UI, current state:", {
+    loadingDetails,
+    hasWorkout: !!workout,
+    workoutName: workout?.name,
+    exercisesCount: workout?.exercises?.length || 0,
+    userId,
+  });
+
+  if (loadingDetails) {
+    console.log("⏳ Rendering loading spinner");
+    return (
+      <View style={styles.container}>
+        <LoadingSpinner text="A carregar detalhes do treino..." />
       </View>
     );
   }
 
+  if (!workout) {
+    console.log("❌ Rendering error screen - no workout");
+    return (
+      <View style={styles.errorContainer}>
+        <Ionicons name="alert-circle-outline" size={64} color={colors.error} />
+        <Text style={styles.errorText}>
+          Não foi possível apresentar os detalhes do treino.
+        </Text>
+        <Button
+          title="Voltar à Lista"
+          onPress={safeGoBack}
+          style={{ marginTop: 20 }}
+        />
+      </View>
+    );
+  }
+
+  console.log("✅ Rendering main workout detail screen");
   return (
     <View style={styles.container}>
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        duration={toast.duration}
+        onHide={hideToast}
+        position="top"
+      />
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        visible={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={confirmDeleteWorkout}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja apagar o treino "${
+          workout.name || "este treino"
+        }"? Esta ação não pode ser desfeita.`}
+        confirmText="Apagar"
+        cancelText="Cancelar"
+        type="error"
+        confirmButtonStyle={{ backgroundColor: colors.error }}
+        isLoading={isDeleting}
+      />
+
+      {/* Duplicate Confirmation Modal */}
+      <ConfirmModal
+        visible={showDuplicateModal}
+        onClose={() => setShowDuplicateModal(false)}
+        onConfirm={confirmDuplicateWorkout}
+        title="Duplicar Treino"
+        message={`Deseja duplicar o treino "${workout.name || "este treino"}"?`}
+        confirmText="Duplicar"
+        cancelText="Cancelar"
+        type="default"
+        isLoading={isDuplicating}
+      />
+
       <ScrollView
         style={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
       >
-        <View style={[globalStyles.card, styles.workoutHeader]}>
+        <View style={[globalStyles.card, styles.workoutInfoCard]}>
           <View style={styles.workoutTitleRow}>
             <View style={styles.workoutTitleContainer}>
-              <Text style={styles.workoutName}>{workout.name}</Text>
-              <Text style={styles.workoutDate}>
-                {new Date(workout.date).toLocaleDateString("pt-PT", {
+              <Text style={styles.workoutNameText}>
+                {workout.name || "Treino sem nome"}
+              </Text>
+              <Text style={styles.workoutDateText}>
+                {new Date(
+                  (workout.date || Date.now()) + "T00:00:00"
+                ).toLocaleDateString("pt-PT", {
                   weekday: "long",
                   day: "numeric",
                   month: "long",
@@ -152,50 +433,91 @@ export default function WorkoutDetailScreen({ route, navigation }) {
                 })}
               </Text>
             </View>
-            <TouchableOpacity
-              onPress={deleteWorkout}
-              style={styles.deleteButton}
-            >
-              <Ionicons name="trash-outline" size={24} color={colors.error} />
-            </TouchableOpacity>
           </View>
 
           {workout.notes && (
-            <Text style={styles.workoutNotes}>{workout.notes}</Text>
+            <Text style={styles.workoutNotesText}>{workout.notes}</Text>
           )}
 
           <View style={styles.workoutStats}>
             <View style={styles.statItem}>
+              <Ionicons
+                name="barbell-outline"
+                size={20}
+                color={colors.primary}
+                style={styles.statIcon}
+              />
               <Text style={styles.statLabel}>Exercícios</Text>
               <Text style={styles.statValue}>
                 {workout.exercises?.length || 0}
               </Text>
             </View>
             <View style={styles.statItem}>
-              <Text style={styles.statLabel}>Data</Text>
+              <Ionicons
+                name="calendar-outline"
+                size={20}
+                color={colors.primary}
+                style={styles.statIcon}
+              />
+              <Text style={styles.statLabel}>Criado em</Text>
               <Text style={styles.statValue}>
-                {new Date(workout.created_at).toLocaleDateString("pt-PT")}
+                {new Date(workout.created_at || Date.now()).toLocaleDateString(
+                  "pt-PT"
+                )}
               </Text>
             </View>
           </View>
         </View>
 
+        <View style={styles.actionsRow}>
+          <Button
+            title="Editar Treino"
+            variant="ghost"
+            onPress={() => {
+              console.log("✏️ Edit workout pressed, navigating to EditWorkout");
+              navigation.navigate("EditWorkout", { workoutId: workout.id });
+            }}
+            icon={
+              <Ionicons
+                name="pencil-outline"
+                size={18}
+                color={colors.primary}
+              />
+            }
+            style={styles.actionButton}
+            textStyle={styles.actionButtonText}
+            disabled={isDeleting || isDuplicating}
+          />
+          <Button
+            title="Duplicar"
+            variant="ghost"
+            onPress={handleDuplicateWorkout}
+            icon={
+              <Ionicons name="copy-outline" size={18} color={colors.primary} />
+            }
+            style={styles.actionButton}
+            textStyle={styles.actionButtonText}
+            isLoading={isDuplicating}
+            disabled={isDeleting || isDuplicating}
+          />
+        </View>
+
         <View style={styles.exercisesSection}>
-          <Text style={styles.sectionTitle}>Exercícios</Text>
+          <Text style={styles.sectionTitle}>Exercícios Realizados</Text>
 
           {workout.exercises && workout.exercises.length > 0 ? (
-            workout.exercises.map((exercise, index) =>
-              renderExercise(exercise, index)
-            )
+            workout.exercises.map((exercise, index) => {
+              return renderExercise(exercise, index);
+            })
           ) : (
-            <View style={styles.noExercisesContainer}>
+            <View style={[globalStyles.card, styles.noExercisesContainer]}>
               <Ionicons
-                name="fitness-outline"
+                name="sad-outline"
                 size={48}
-                color={colors.gray[400]}
+                color={colors.gray?.[400]}
               />
               <Text style={styles.noExercisesText}>
-                Nenhum exercício registado
+                Nenhum exercício registado para este treino.
               </Text>
             </View>
           )}
@@ -204,29 +526,24 @@ export default function WorkoutDetailScreen({ route, navigation }) {
 
       <View style={styles.bottomButtons}>
         <Button
-          title="Editar Treino"
-          variant="outline"
+          title="Apagar Treino"
           onPress={() => {
-            // TODO: Navigate to edit workout screen
-            Alert.alert("Info", "Funcionalidade de edição em desenvolvimento");
+            console.log("🖱️ Delete button pressed");
+            handleDeleteWorkout();
           }}
-          style={styles.editWorkoutButton}
-        />
-        <Button
-          title="Duplicar Treino"
-          onPress={() => {
-            // TODO: Duplicate workout logic
-            Alert.alert(
-              "Info",
-              "Funcionalidade de duplicação em desenvolvimento"
-            );
-          }}
-          style={styles.duplicateButton}
+          icon={
+            <Ionicons name="trash-outline" size={20} color={colors.white} />
+          }
+          style={styles.mainDeleteButton}
+          isLoading={isDeleting}
+          disabled={isDeleting || isDuplicating}
         />
       </View>
     </View>
   );
 }
+
+// ...existing styles...
 
 const styles = StyleSheet.create({
   container: {
@@ -235,56 +552,76 @@ const styles = StyleSheet.create({
   },
   scrollContainer: {
     flex: 1,
-    padding: 20,
   },
-  workoutHeader: {
-    marginBottom: 20,
+  workoutInfoCard: {
+    marginHorizontal: 20,
+    marginTop: 20,
+    marginBottom: 10,
   },
   workoutTitleRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    marginBottom: 15,
+    marginBottom: 10,
   },
   workoutTitleContainer: {
     flex: 1,
   },
-  workoutName: {
-    fontSize: typography.sizes.xxl,
-    fontWeight: typography.weights.bold,
+  workoutNameText: {
+    fontSize: typography?.sizes?.xxl || 24,
+    fontWeight: typography?.weights?.bold || "bold",
     color: colors.text,
-    marginBottom: 5,
+    marginBottom: 3,
   },
-  workoutDate: {
-    fontSize: typography.sizes.md,
+  workoutDateText: {
+    fontSize: typography?.sizes?.md || 16,
     color: colors.textSecondary,
     textTransform: "capitalize",
   },
-  deleteButton: {
-    padding: 5,
-  },
-  workoutNotes: {
-    fontSize: typography.sizes.md,
+  workoutNotesText: {
+    fontSize: typography?.sizes?.md || 16,
     color: colors.textSecondary,
-    fontStyle: "italic",
     marginBottom: 15,
-    lineHeight: 20,
+    lineHeight: typography?.lineHeights?.md || 22,
   },
   workoutStats: {
     flexDirection: "row",
     justifyContent: "space-around",
     paddingTop: 15,
+    marginTop: 10,
     borderTopWidth: 1,
-    borderTopColor: colors.gray[200],
+    borderTopColor: colors.gray?.[200],
+  },
+  actionsRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginHorizontal: 20,
+    marginBottom: 20,
+    paddingVertical: 10,
+    backgroundColor: colors.white,
+    borderRadius: globalStyles.card?.borderRadius || 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  actionButton: {
+    paddingHorizontal: 10,
+  },
+  actionButtonText: {
+    color: colors.primary,
+    fontWeight: typography?.weights?.semibold || "600",
   },
   exercisesSection: {
-    marginBottom: 100, // Space for bottom buttons
+    paddingHorizontal: 20,
   },
   sectionTitle: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.bold,
+    fontSize: typography?.sizes?.lg || 18,
+    fontWeight: typography?.weights?.bold || "bold",
     color: colors.text,
     marginBottom: 15,
+    marginTop: 10,
   },
   exerciseCard: {
     marginBottom: 15,
@@ -293,52 +630,60 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 15,
+    marginBottom: 10,
   },
-  exerciseName: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.bold,
+  exerciseNameText: {
+    fontSize: typography?.sizes?.lg || 18,
+    fontWeight: typography?.weights?.semibold || "600",
     color: colors.text,
     flex: 1,
   },
   editButton: {
-    padding: 5,
+    padding: 8,
   },
   exerciseStats: {
     flexDirection: "row",
-    justifyContent: "space-around",
+    justifyContent: "space-between",
     marginBottom: 10,
+    paddingHorizontal: 5,
   },
   statItem: {
     alignItems: "center",
+    flex: 1,
+    paddingVertical: 5,
+  },
+  statIcon: {
+    marginBottom: 3,
   },
   statLabel: {
-    fontSize: typography.sizes.sm,
+    fontSize: typography?.sizes?.sm || 14,
     color: colors.textSecondary,
     marginBottom: 2,
   },
   statValue: {
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.bold,
+    fontSize: typography?.sizes?.md || 16,
+    fontWeight: typography?.weights?.bold || "bold",
     color: colors.text,
   },
   exerciseNotes: {
-    fontSize: typography.sizes.sm,
+    fontSize: typography?.sizes?.sm || 14,
     color: colors.textSecondary,
     fontStyle: "italic",
-    marginTop: 10,
-    paddingTop: 10,
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: colors.gray[200],
+    borderTopColor: colors.gray?.[200],
   },
   noExercisesContainer: {
     alignItems: "center",
-    paddingVertical: 40,
+    paddingVertical: 30,
+    borderRadius: globalStyles.card?.borderRadius || 8,
   },
   noExercisesText: {
-    fontSize: typography.sizes.md,
+    fontSize: typography?.sizes?.md || 16,
     color: colors.textSecondary,
     marginTop: 10,
+    textAlign: "center",
   },
   bottomButtons: {
     flexDirection: "row",
@@ -346,23 +691,22 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     backgroundColor: colors.white,
     borderTopWidth: 1,
-    borderTopColor: colors.gray[200],
+    borderTopColor: colors.gray?.[200],
   },
-  editWorkoutButton: {
+  mainDeleteButton: {
     flex: 1,
-    marginRight: 10,
-  },
-  duplicateButton: {
-    flex: 1,
-    marginLeft: 10,
+    backgroundColor: colors.error,
   },
   errorContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    padding: 20,
   },
   errorText: {
-    fontSize: typography.sizes.lg,
+    fontSize: typography?.sizes?.lg || 18,
     color: colors.error,
+    textAlign: "center",
+    marginBottom: 10,
   },
 });

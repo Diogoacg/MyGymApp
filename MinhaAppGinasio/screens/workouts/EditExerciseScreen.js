@@ -11,10 +11,12 @@ import {
 import { supabase } from "../../lib/supabaseClient";
 import Button from "../../components/common/Button";
 import Input from "../../components/common/Input";
+import Toast from "../../components/common/Toast";
 import LoadingSpinner from "../../components/common/LoadingSpinner";
 import { colors } from "../../styles/colors";
 import { typography } from "../../styles/typography";
 import { globalStyles } from "../../styles/globalStyles";
+import useToast from "../../hooks/useToast";
 
 export default function EditExerciseScreen({ route, navigation }) {
   const { exerciseId, workoutId } = route.params;
@@ -27,6 +29,9 @@ export default function EditExerciseScreen({ route, navigation }) {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const { toast, showSuccess, showError, showWarning, hideToast } = useToast();
 
   useEffect(() => {
     loadExercise();
@@ -50,7 +55,7 @@ export default function EditExerciseScreen({ route, navigation }) {
         notes: data.notes || "",
       });
     } catch (error) {
-      Alert.alert("Erro", "Não foi possível carregar o exercício.");
+      showError("Não foi possível carregar o exercício.");
       navigation.goBack();
     } finally {
       setLoading(false);
@@ -63,7 +68,7 @@ export default function EditExerciseScreen({ route, navigation }) {
 
   const validateForm = () => {
     if (!exercise.name.trim()) {
-      Alert.alert("Erro", "Por favor, insira um nome para o exercício.");
+      showError("Por favor, insira um nome para o exercício.");
       return false;
     }
     return true;
@@ -78,7 +83,9 @@ export default function EditExerciseScreen({ route, navigation }) {
         name: exercise.name.trim(),
         sets: exercise.sets ? parseInt(exercise.sets) : null,
         reps: exercise.reps ? parseInt(exercise.reps) : null,
-        weight_kg: exercise.weight_kg ? parseFloat(exercise.weight_kg) : null,
+        weight_kg: exercise.weight_kg
+          ? parseFloat(exercise.weight_kg.replace(",", "."))
+          : null,
         notes: exercise.notes.trim(),
       };
 
@@ -89,14 +96,10 @@ export default function EditExerciseScreen({ route, navigation }) {
 
       if (error) throw error;
 
-      Alert.alert("Sucesso", "Exercício atualizado com sucesso!", [
-        {
-          text: "OK",
-          onPress: () => navigation.goBack(),
-        },
-      ]);
+      showSuccess("Exercício atualizado com sucesso! 🎉");
+      setTimeout(() => navigation.goBack(), 1500);
     } catch (error) {
-      Alert.alert("Erro", "Não foi possível atualizar o exercício.");
+      showError("Não foi possível atualizar o exercício.");
       console.error("Error updating exercise:", error);
     } finally {
       setSaving(false);
@@ -104,26 +107,52 @@ export default function EditExerciseScreen({ route, navigation }) {
   };
 
   const deleteExercise = async () => {
-    Alert.alert("Confirmar", "Tem certeza que deseja apagar este exercício?", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Apagar",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            const { error } = await supabase
-              .from("exercises")
-              .delete()
-              .eq("id", exerciseId);
+    Alert.alert(
+      "Confirmar",
+      `Tem certeza que deseja apagar o exercício "${exercise.name}"?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Apagar",
+          style: "destructive",
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              const { error } = await supabase
+                .from("exercises")
+                .delete()
+                .eq("id", exerciseId);
 
-            if (error) throw error;
-            navigation.goBack();
-          } catch (error) {
-            Alert.alert("Erro", "Não foi possível apagar o exercício.");
-          }
+              if (error) throw error;
+
+              showSuccess("Exercício apagado com sucesso!");
+              setTimeout(() => navigation.goBack(), 1500);
+            } catch (error) {
+              showError("Não foi possível apagar o exercício.");
+            } finally {
+              setDeleting(false);
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
+  };
+
+  const handleGoBack = () => {
+    // Verificar se há mudanças não salvas
+    const hasChanges =
+      exercise.name !== "" ||
+      exercise.sets !== "" ||
+      exercise.reps !== "" ||
+      exercise.weight_kg !== "" ||
+      exercise.notes !== "";
+
+    if (hasChanges) {
+      showWarning("Alterações não salvas serão perdidas.", 2000);
+      setTimeout(() => navigation.goBack(), 1000);
+    } else {
+      navigation.goBack();
+    }
   };
 
   if (loading) {
@@ -135,9 +164,19 @@ export default function EditExerciseScreen({ route, navigation }) {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        duration={toast.duration}
+        onHide={hideToast}
+        position="top"
+      />
+
       <ScrollView
         style={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.content}>
           <View style={[globalStyles.card, styles.exerciseCard]}>
@@ -148,6 +187,7 @@ export default function EditExerciseScreen({ route, navigation }) {
               placeholder="Ex: Supino Reto"
               value={exercise.name}
               onChangeText={(value) => updateField("name", value)}
+              editable={!saving && !deleting}
             />
 
             <View style={styles.exerciseRow}>
@@ -158,6 +198,7 @@ export default function EditExerciseScreen({ route, navigation }) {
                 onChangeText={(value) => updateField("sets", value)}
                 keyboardType="numeric"
                 style={styles.smallInput}
+                editable={!saving && !deleting}
               />
               <Input
                 label="Repetições"
@@ -166,14 +207,16 @@ export default function EditExerciseScreen({ route, navigation }) {
                 onChangeText={(value) => updateField("reps", value)}
                 keyboardType="numeric"
                 style={styles.smallInput}
+                editable={!saving && !deleting}
               />
               <Input
                 label="Peso (kg)"
-                placeholder="50"
+                placeholder="50 ou 50.5"
                 value={exercise.weight_kg}
                 onChangeText={(value) => updateField("weight_kg", value)}
                 keyboardType="decimal-pad"
                 style={styles.smallInput}
+                editable={!saving && !deleting}
               />
             </View>
 
@@ -184,6 +227,7 @@ export default function EditExerciseScreen({ route, navigation }) {
               onChangeText={(value) => updateField("notes", value)}
               multiline
               numberOfLines={3}
+              editable={!saving && !deleting}
             />
           </View>
         </View>
@@ -195,18 +239,22 @@ export default function EditExerciseScreen({ route, navigation }) {
           variant="outline"
           onPress={deleteExercise}
           style={[styles.button, styles.deleteButton]}
+          disabled={saving || deleting}
+          isLoading={deleting}
         />
         <Button
           title="Cancelar"
           variant="secondary"
-          onPress={() => navigation.goBack()}
+          onPress={handleGoBack}
           style={styles.button}
+          disabled={saving || deleting}
         />
         <Button
           title="Guardar"
           onPress={saveExercise}
-          loading={saving}
+          isLoading={saving}
           style={styles.button}
+          disabled={saving || deleting}
         />
       </View>
     </KeyboardAvoidingView>
@@ -221,9 +269,11 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flex: 1,
   },
+  scrollContent: {
+    paddingBottom: 120, // Space for bottom buttons
+  },
   content: {
     padding: 20,
-    paddingBottom: 100, // Space for bottom buttons
   },
   exerciseCard: {
     marginBottom: 20,
@@ -238,18 +288,29 @@ const styles = StyleSheet.create({
   exerciseRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    gap: 12,
   },
   smallInput: {
     flex: 1,
-    marginHorizontal: 5,
   },
   bottomButtons: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     flexDirection: "row",
     padding: 20,
-    paddingTop: 10,
     backgroundColor: colors.white,
     borderTopWidth: 1,
     borderTopColor: colors.gray[200],
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: -2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 8,
   },
   button: {
     flex: 1,
