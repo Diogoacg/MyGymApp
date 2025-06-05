@@ -177,6 +177,7 @@ export function ConfirmModal({
   onConfirm,
   title = "Confirmar",
   message,
+  children, // Adicionar suporte para conteúdo customizado
   confirmText = "Confirmar",
   cancelText = "Cancelar",
   type = "warning",
@@ -192,7 +193,13 @@ export function ConfirmModal({
       closable={!isLoading}
     >
       <View style={confirmModalStyles.container}>
-        <Text style={confirmModalStyles.message}>{message}</Text>
+        {/* Renderizar mensagem ou conteúdo customizado */}
+        {children ? (
+          children
+        ) : (
+          <Text style={confirmModalStyles.message}>{message}</Text>
+        )}
+
         <View style={confirmModalStyles.buttons}>
           <Button
             title={cancelText}
@@ -237,6 +244,7 @@ const confirmModalStyles = StyleSheet.create({
     gap: 16,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 20, // Adicionar margem superior para separar do conteúdo
   },
   button: {
     flex: 1,

@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import {
   View,
   Text,
-  Alert,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -12,6 +11,10 @@ import {
 import { supabase } from "../../lib/supabaseClient";
 import Button from "../../components/common/Button";
 import Input from "../../components/common/Input";
+import Modal from "../../components/common/Modal";
+import Toast from "../../components/common/Toast";
+import useModal from "../../hooks/useModal";
+import useToast from "../../hooks/useToast";
 import { colors } from "../../styles/colors";
 import { typography } from "../../styles/typography";
 import { globalStyles } from "../../styles/globalStyles";
@@ -23,6 +26,10 @@ export default function SignUpScreen({ navigation }) {
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+
+  // Hooks para modal e toast
+  const { showModal, visible, config, hideModal } = useModal();
+  const { toast, showSuccess, showError, hideToast } = useToast();
 
   function validateForm() {
     const newErrors = {};
@@ -54,96 +61,173 @@ export default function SignUpScreen({ navigation }) {
   }
 
   async function handleSignUp() {
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      showError("Por favor, corrija os erros no formulário.");
+      return;
+    }
 
     setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password: password,
-      options: {
-        data: {
-          full_name: fullName,
+    try {
+      const { error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password: password,
+        options: {
+          data: {
+            full_name: fullName,
+          },
         },
-      },
-    });
+      });
 
-    if (error) {
-      Alert.alert("Erro no Registo", error.message);
-    } else {
-      Alert.alert(
-        "Registo Efetuado!",
-        "Por favor, verifique o seu email para confirmar a conta.",
-        [{ text: "OK", onPress: () => navigation.navigate("Login") }]
-      );
+      if (error) {
+        throw error;
+      }
+
+      // Mostrar modal de sucesso
+      showModal({
+        title: "Registo Efetuado!",
+        type: "success",
+        content: {
+          type: "message",
+          message:
+            "Por favor, verifique o seu email para confirmar a conta. Após confirmar, poderá fazer login.",
+        },
+      });
+    } catch (error) {
+      console.error("Sign up error:", error);
+      showError(error.message || "Erro ao criar conta. Tente novamente.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
+  const handleModalClose = () => {
+    hideModal();
+    if (config.type === "success") {
+      navigation.navigate("Login");
+    }
+  };
+
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.content}>
-          <Text style={styles.title}>Criar Conta</Text>
-          <Text style={styles.subtitle}>Junte-se à nossa comunidade</Text>
+    <>
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        duration={toast.duration}
+        onHide={hideToast}
+        position="top"
+      />
 
-          <Input
-            label="Nome Completo"
-            placeholder="Seu nome completo"
-            value={fullName}
-            onChangeText={setFullName}
-            error={errors.fullName}
-          />
+      <Modal
+        visible={visible}
+        onClose={handleModalClose}
+        title={config.title}
+        type={config.type}
+      >
+        {config.content?.type === "message" && (
+          <View style={styles.modalContent}>
+            <Text style={styles.modalMessage}>{config.content.message}</Text>
+            <Button
+              title="OK"
+              onPress={handleModalClose}
+              style={styles.modalButton}
+            />
+          </View>
+        )}
+      </Modal>
 
-          <Input
-            label="Email"
-            placeholder="seu@email.com"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            error={errors.email}
-          />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.content}>
+            <Text style={styles.title}>Criar Conta</Text>
+            <Text style={styles.subtitle}>Junte-se à nossa comunidade</Text>
 
-          <Input
-            label="Password"
-            placeholder="••••••••"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            error={errors.password}
-          />
+            <Input
+              label="Nome Completo"
+              placeholder="Seu nome completo"
+              value={fullName}
+              onChangeText={(text) => {
+                setFullName(text);
+                if (errors.fullName) {
+                  setErrors((prev) => ({ ...prev, fullName: null }));
+                }
+              }}
+              error={errors.fullName}
+              editable={!loading}
+            />
 
-          <Input
-            label="Confirmar Password"
-            placeholder="••••••••"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            error={errors.confirmPassword}
-          />
+            <Input
+              label="Email"
+              placeholder="seu@email.com"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                if (errors.email) {
+                  setErrors((prev) => ({ ...prev, email: null }));
+                }
+              }}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              error={errors.email}
+              editable={!loading}
+            />
 
-          <Button
-            title="Criar Conta"
-            onPress={handleSignUp}
-            loading={loading}
-            size="large"
-            style={styles.signUpButton}
-          />
+            <Input
+              label="Password"
+              placeholder="••••••••"
+              value={password}
+              onChangeText={(text) => {
+                setPassword(text);
+                if (errors.password) {
+                  setErrors((prev) => ({ ...prev, password: null }));
+                }
+              }}
+              secureTextEntry
+              error={errors.password}
+              editable={!loading}
+            />
 
-          <TouchableOpacity
-            style={styles.linkButton}
-            onPress={() => navigation.navigate("Login")}
-          >
-            <Text style={styles.linkText}>
-              Já tem conta? <Text style={styles.linkTextBold}>Entre aqui</Text>
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            <Input
+              label="Confirmar Password"
+              placeholder="••••••••"
+              value={confirmPassword}
+              onChangeText={(text) => {
+                setConfirmPassword(text);
+                if (errors.confirmPassword) {
+                  setErrors((prev) => ({ ...prev, confirmPassword: null }));
+                }
+              }}
+              secureTextEntry
+              error={errors.confirmPassword}
+              editable={!loading}
+            />
+
+            <Button
+              title="Criar Conta"
+              onPress={handleSignUp}
+              isLoading={loading}
+              disabled={loading}
+              size="large"
+              style={styles.signUpButton}
+            />
+
+            <TouchableOpacity
+              style={[styles.linkButton, loading && styles.disabledLink]}
+              onPress={() => !loading && navigation.navigate("Login")}
+              disabled={loading}
+            >
+              <Text style={[styles.linkText, loading && styles.disabledText]}>
+                Já tem conta?{" "}
+                <Text style={styles.linkTextBold}>Entre aqui</Text>
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </>
   );
 }
 
@@ -188,5 +272,24 @@ const styles = StyleSheet.create({
   linkTextBold: {
     fontWeight: typography.weights.bold,
     color: colors.primary,
+  },
+  disabledLink: {
+    opacity: 0.6,
+  },
+  disabledText: {
+    color: colors.gray[400],
+  },
+  modalContent: {
+    alignItems: "center",
+  },
+  modalMessage: {
+    fontSize: typography.sizes.md,
+    color: colors.text,
+    textAlign: "center",
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  modalButton: {
+    minWidth: 100,
   },
 });

@@ -5,158 +5,235 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   RefreshControl,
-  ActivityIndicator, // Adicionado para feedback de loading
+  ActivityIndicator,
+  Animated,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { supabase } from "../lib/supabaseClient";
+import { useFocusEffect } from "@react-navigation/native";
 import Button from "../components/common/Button";
 import Input from "../components/common/Input";
+import Toast from "../components/common/Toast";
+import { ConfirmModal } from "../components/common/Modal";
 import { colors } from "../styles/colors";
 import { typography } from "../styles/typography";
 import { globalStyles } from "../styles/globalStyles";
-import useWaterIntake from "../hooks/useWaterIntake"; // Importar o hook
+import useWaterIntake from "../hooks/useWaterIntake";
+import useUserSettings from "../hooks/useUserSettings";
+import useToast from "../hooks/useToast";
 
 export default function WaterTrackingScreen() {
   const {
-    userId, // Pode ser útil para debug ou outras funcionalidades
+    userId,
     todayIntake,
     weeklyData,
-    loading, // Objeto de loading: { today, weekly, action }
+    dailyGoal,
+    loading,
     error,
     fetchTodayIntake,
     fetchWeeklyData,
+    fetchUserSettings,
     addWaterIntake,
     deleteWaterLog,
+    getTodayLogs,
+    getLocalDateString,
   } = useWaterIntake();
 
-  const [customAmount, setCustomAmount] = useState("");
-  const [todayLogs, setTodayLogs] = useState([]); // Manter logs diários localmente se o hook não os fornecer
+  const { settings } = useUserSettings();
+  const { toast, showSuccess, showError, hideToast } = useToast();
 
-  const dailyGoal = 2000; // ml
+  const [customAmount, setCustomAmount] = useState("");
+  const [todayLogs, setTodayLogs] = useState([]);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [logToDelete, setLogToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Animação para o progresso
+  const progressAnimation = useState(new Animated.Value(0))[0];
+
+  // Usar meta diretamente dos settings
+  const currentWaterGoal = settings.water_goal_ml || 2000;
+
+  console.log("💧 WaterTrackingScreen render:", {
+    todayIntake,
+    dailyGoal,
+    currentWaterGoal,
+    settingsWaterGoal: settings.water_goal_ml,
+    todayDate: getLocalDateString ? getLocalDateString() : "not available",
+    weeklyDataCount: weeklyData.length,
+    todayLogsCount: todayLogs.length,
+  });
+
+  // useFocusEffect para recarregar quando voltar à tela
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log("🎯 WaterTracking gained focus - reloading data...");
+      if (userId) {
+        loadAllWaterData();
+      }
+    }, [userId])
+  );
 
   // Função para carregar/recarregar todos os dados
   const loadAllWaterData = async () => {
-    // O hook já carrega os dados iniciais no useEffect quando o userId está disponível.
-    // Esta função pode ser usada para o RefreshControl.
     if (userId) {
-      // As funções fetch do hook já gerem o seu próprio estado de loading.
       await Promise.all([
         fetchTodayIntake(),
         fetchWeeklyData(),
-        getTodayLogsForScreen(),
+        fetchUserSettings(),
+        loadTodayLogs(),
       ]);
     }
   };
 
-  // O hook lida com o carregamento inicial, mas podemos querer recarregar com RefreshControl
+  // Função para carregar logs de hoje usando o hook
+  const loadTodayLogs = async () => {
+    if (getTodayLogs) {
+      const logs = await getTodayLogs();
+      setTodayLogs(logs);
+      console.log("📋 Today logs loaded:", {
+        count: logs.length,
+        date: getLocalDateString ? getLocalDateString() : "unknown",
+      });
+    }
+  };
+
+  // Recarregar logs quando todayIntake mudar
   useEffect(() => {
     if (userId) {
-      getTodayLogsForScreen(); // Carregar os logs detalhados para exibição
+      loadTodayLogs();
     }
-  }, [userId, todayIntake]); // Recarregar logs se o userId ou todayIntake mudar
+  }, [userId, todayIntake]);
 
-  // Função para buscar os logs detalhados do dia para exibição na tela
-  // O hook useWaterIntake foca-se nos totais, esta função busca os itens individuais para a lista.
-  async function getTodayLogsForScreen() {
-    if (!userId) return;
-    // setLoading(true); // O hook tem seu próprio loading, mas podemos ter um para esta operação específica
-    try {
-      const todayDate = new Date().toISOString().split("T")[0];
-      const { data, error: fetchError } = await supabase // supabase ainda é necessário para esta query específica
-        .from("water_intake_logs")
-        .select("*") // Selecionar todos os campos para a lista de logs
-        .eq("user_id", userId)
-        .eq("date", todayDate)
-        .order("logged_at", { ascending: false });
+  // Animação do progresso (usar meta atual dos settings)
+  useEffect(() => {
+    const progressPercentage = Math.min(
+      (todayIntake / currentWaterGoal) * 100,
+      100
+    );
 
-      if (fetchError) throw fetchError;
+    console.log("🎬 Water screen - updating progress animation:", {
+      todayIntake,
+      currentWaterGoal,
+      progressPercentage,
+    });
 
-      if (data) {
-        setTodayLogs(data);
-      }
-    } catch (e) {
-      console.error("Erro ao buscar logs detalhados de hoje:", e);
-      Alert.alert("Erro", "Não foi possível carregar os registos de hoje.");
-    } finally {
-      // setLoading(false);
-    }
-  }
+    Animated.timing(progressAnimation, {
+      toValue: progressPercentage / 100,
+      duration: 500,
+      useNativeDriver: false,
+    }).start();
+  }, [todayIntake, currentWaterGoal]);
 
   async function handleLogWater(amount) {
     if (!userId) {
-      Alert.alert("Erro", "Utilizador não autenticado.");
+      showError("Utilizador não autenticado.");
       return;
     }
+
+    console.log("💧 Logging water for today:", {
+      amount,
+      currentDate: getLocalDateString ? getLocalDateString() : "unknown",
+    });
+
     const result = await addWaterIntake(amount);
     if (result.error) {
-      Alert.alert(
-        "Erro",
+      showError(
         result.error.message || "Não foi possível registar o consumo de água."
       );
     } else {
-      Alert.alert("Sucesso", `${amount}ml de água registados!`);
-      getTodayLogsForScreen(); // Atualizar a lista de logs detalhados
+      showSuccess(`${amount}ml de água registados!`);
+      // Os logs serão recarregados automaticamente devido ao useEffect
     }
   }
 
   async function handleAddCustomAmount() {
     const amount = parseInt(customAmount);
     if (isNaN(amount) || amount <= 0) {
-      Alert.alert("Erro", "Por favor, insira uma quantidade válida.");
+      showError("Por favor, insira uma quantidade válida.");
+      return;
+    }
+    if (amount > 2000) {
+      showError("Quantidade muito elevada. Máximo: 2000ml por registo.");
       return;
     }
     await handleLogWater(amount);
     setCustomAmount("");
   }
 
-  async function handleDeleteLog(logId) {
-    if (!userId) {
-      Alert.alert("Erro", "Utilizador não autenticado.");
-      return;
+  const handleDeleteRequest = (log) => {
+    setLogToDelete(log);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!logToDelete || !userId) return;
+
+    setIsDeleting(true);
+    setShowDeleteModal(false);
+
+    try {
+      const result = await deleteWaterLog(logToDelete.id);
+      if (result.error) {
+        showError(result.error.message || "Não foi possível apagar o registo.");
+      } else {
+        showSuccess("Registo apagado com sucesso!");
+        // Os logs serão recarregados automaticamente devido ao useEffect
+      }
+    } catch (error) {
+      showError("Erro inesperado ao apagar registo.");
+    } finally {
+      setIsDeleting(false);
+      setLogToDelete(null);
     }
-    Alert.alert(
-      "Confirmar Exclusão",
-      "Tem a certeza que deseja apagar este registo?",
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Apagar",
-          style: "destructive",
-          onPress: async () => {
-            const result = await deleteWaterLog(logId);
-            if (result.error) {
-              Alert.alert(
-                "Erro",
-                result.error.message || "Não foi possível apagar o registo."
-              );
-            } else {
-              Alert.alert("Sucesso", "Registo apagado.");
-              getTodayLogsForScreen(); // Atualizar a lista de logs detalhados
-            }
-          },
-        },
-      ]
-    );
-  }
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteModal(false);
+    setLogToDelete(null);
+  };
 
   useEffect(() => {
     if (error) {
-      Alert.alert(
-        "Erro no Hook",
+      showError(
         error.message || "Ocorreu um erro ao processar os dados de água."
       );
     }
   }, [error]);
 
-  const progressPercentage = Math.min((todayIntake / dailyGoal) * 100, 100);
+  // Calcular progresso com a meta atual dos settings
+  const progressPercentage = Math.min(
+    (todayIntake / currentWaterGoal) * 100,
+    100
+  );
 
   // Determinar o estado de refresh geral
-  const isRefreshing = loading.today || loading.weekly || loading.action;
+  const isRefreshing =
+    loading.today || loading.weekly || loading.action || loading.settings;
 
-  if (!userId && loading.today) {
-    // Se o userId ainda não estiver definido e o hook estiver a tentar carregar
+  // Função para obter cor baseada no progresso
+  const getProgressColor = () => {
+    if (progressPercentage < 30) return colors.error;
+    if (progressPercentage < 70) return colors.warning;
+    return colors.success;
+  };
+
+  // Função para obter ícone baseado no progresso
+  const getProgressIcon = () => {
+    if (progressPercentage >= 100) return "checkmark-circle";
+    if (progressPercentage >= 70) return "water";
+    return "water-outline";
+  };
+
+  // Função para formatar horário de um log
+  const formatLogTime = (loggedAt) => {
+    return new Date(loggedAt).toLocaleTimeString("pt-PT", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  if (!userId && (loading.today || loading.settings)) {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -168,158 +245,274 @@ export default function WaterTrackingScreen() {
   }
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl
-          refreshing={isRefreshing}
-          onRefresh={loadAllWaterData}
-        />
-      }
-    >
-      <View style={[globalStyles.card, styles.progressCard]}>
-        <Text style={styles.title}>Consumo de Água Hoje</Text>
-        {loading.today && !isRefreshing ? (
-          <ActivityIndicator
-            style={{ marginVertical: 20 }}
-            size="small"
-            color={colors.primary}
-          />
-        ) : (
-          <Text style={styles.intakeAmount}>{todayIntake}ml</Text>
-        )}
-        <Text style={styles.goalText}>Meta: {dailyGoal}ml</Text>
+    <View style={styles.container}>
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        duration={toast.duration}
+        onHide={hideToast}
+        position="top"
+      />
 
-        <View style={styles.progressBarContainer}>
-          <View style={styles.progressBar}>
-            <View
-              style={[styles.progressFill, { width: `${progressPercentage}%` }]}
+      {/* Delete Confirmation Modal */}
+      <ConfirmModal
+        visible={showDeleteModal}
+        onClose={cancelDelete}
+        onConfirm={confirmDelete}
+        title="Confirmar Exclusão"
+        message={`Tem certeza que deseja apagar o registo de ${
+          logToDelete?.amount_ml
+        }ml registado às ${
+          logToDelete ? formatLogTime(logToDelete.logged_at) : ""
+        }?`}
+        confirmText="Apagar"
+        cancelText="Cancelar"
+        type="error"
+        confirmButtonStyle={{ backgroundColor: colors.error }}
+        isLoading={isDeleting}
+      />
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={loadAllWaterData}
+            tintColor={colors.primary}
+          />
+        }
+      >
+        {/* Header com Progress */}
+        <View style={[globalStyles.card, styles.progressCard]}>
+          <View style={styles.progressHeader}>
+            <Ionicons
+              name={getProgressIcon()}
+              size={32}
+              color={getProgressColor()}
             />
+            <Text style={styles.title}>Consumo de Água</Text>
           </View>
-          <Text style={styles.progressText}>
-            {Math.round(progressPercentage)}%
-          </Text>
-        </View>
-      </View>
 
-      <View style={[globalStyles.card, styles.quickActions]}>
-        <Text style={styles.sectionTitle}>Adicionar Água</Text>
+          <View style={styles.dateContainer}>
+            <Text style={styles.dateText}>
+              {getLocalDateString
+                ? new Date(getLocalDateString()).toLocaleDateString("pt-PT", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                  })
+                : "Data não disponível"}
+            </Text>
+          </View>
 
-        <View style={styles.quickButtons}>
-          <TouchableOpacity
-            style={styles.quickButton}
-            onPress={() => handleLogWater(250)}
-            disabled={loading.action}
-          >
-            <Ionicons name="water" size={24} color={colors.white} />
-            <Text style={styles.quickButtonText}>250ml</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickButton}
-            onPress={() => handleLogWater(500)}
-            disabled={loading.action}
-          >
-            <Ionicons name="water" size={24} color={colors.white} />
-            <Text style={styles.quickButtonText}>500ml</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.quickButton}
-            onPress={() => handleLogWater(750)}
-            disabled={loading.action}
-          >
-            <Ionicons name="water" size={24} color={colors.white} />
-            <Text style={styles.quickButtonText}>750ml</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.customAmountContainer}>
-          <Input
-            placeholder="Quantidade personalizada (ml)"
-            value={customAmount}
-            onChangeText={setCustomAmount}
-            keyboardType="numeric"
-            style={styles.customInput}
-            editable={!loading.action}
-          />
-          <Button
-            title="Adicionar"
-            onPress={handleAddCustomAmount}
-            size="medium"
-            style={styles.addButton}
-            isLoading={loading.action} // Adicionar estado de loading ao botão
-            disabled={loading.action}
-          />
-        </View>
-      </View>
-
-      {loading.weekly && weeklyData.length === 0 ? (
-        <View style={[globalStyles.card, styles.centered, { minHeight: 150 }]}>
-          <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={styles.loadingText}>A carregar dados semanais...</Text>
-        </View>
-      ) : (
-        weeklyData.length > 0 && (
-          <View style={[globalStyles.card, styles.weeklyChart]}>
-            <Text style={styles.sectionTitle}>Esta Semana</Text>
-            <View style={styles.chartContainer}>
-              {weeklyData.map((day, index) => (
-                <View key={index} style={styles.dayColumn}>
-                  <View style={styles.barContainer}>
-                    <View
-                      style={[
-                        styles.bar,
-                        { height: Math.max((day.amount / dailyGoal) * 100, 5) }, // Garante altura mínima
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.dayLabel}>{day.dayName}</Text>
-                  <Text style={styles.dayAmount}>{day.amount}ml</Text>
-                </View>
-              ))}
+          {(loading.today || loading.settings) && !isRefreshing ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={styles.loadingText}>Carregando...</Text>
             </View>
-          </View>
-        )
-      )}
+          ) : (
+            <>
+              <Text
+                style={[styles.intakeAmount, { color: getProgressColor() }]}
+              >
+                {todayIntake}ml
+              </Text>
+              <Text style={styles.goalText}>Meta: {currentWaterGoal}ml</Text>
 
-      {/* Exibir logs detalhados de hoje */}
-      {/* Adicionar um indicador de loading para os logs detalhados se necessário */}
-      {todayLogs.length > 0 && (
-        <View style={[globalStyles.card, styles.logsContainer]}>
-          <Text style={styles.sectionTitle}>Registos de Hoje</Text>
-          {todayLogs.map((log) => (
-            <View key={log.id} style={styles.logItem}>
-              <View style={styles.logInfo}>
-                <Text style={styles.logAmount}>{log.amount_ml}ml</Text>
-                <Text style={styles.logTime}>
-                  {new Date(log.logged_at).toLocaleTimeString("pt-PT", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+              <View style={styles.progressContainer}>
+                <View style={styles.progressBarBackground}>
+                  <Animated.View
+                    style={[
+                      styles.progressBar,
+                      {
+                        width: progressAnimation.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ["0%", "100%"],
+                        }),
+                        backgroundColor: getProgressColor(),
+                      },
+                    ]}
+                  />
+                </View>
+                <Text
+                  style={[styles.progressText, { color: getProgressColor() }]}
+                >
+                  {Math.round(progressPercentage)}%
                 </Text>
               </View>
-              <TouchableOpacity
-                onPress={() => handleDeleteLog(log.id)}
-                style={styles.deleteButton}
-                disabled={loading.action}
-              >
-                {loading.action && (
-                  <ActivityIndicator size="small" color={colors.error} />
-                )}
-                {!loading.action && (
-                  <Ionicons
-                    name="trash-outline"
-                    size={20}
-                    color={colors.error}
-                  />
-                )}
-              </TouchableOpacity>
-            </View>
-          ))}
+
+              {progressPercentage >= 100 && (
+                <View style={styles.congratsContainer}>
+                  <Ionicons name="trophy" size={20} color={colors.success} />
+                  <Text style={styles.congratsText}>Meta atingida! 🎉</Text>
+                </View>
+              )}
+            </>
+          )}
         </View>
-      )}
-    </ScrollView>
+
+        {/* Quick Actions */}
+        <View style={[globalStyles.card, styles.quickActions]}>
+          <Text style={styles.sectionTitle}>Adicionar Água</Text>
+
+          <View style={styles.quickButtons}>
+            {[250, 500, 750].map((amount) => (
+              <TouchableOpacity
+                key={amount}
+                style={[
+                  styles.quickButton,
+                  loading.action && styles.quickButtonDisabled,
+                ]}
+                onPress={() => handleLogWater(amount)}
+                disabled={loading.action}
+                activeOpacity={0.7}
+              >
+                <View style={styles.quickButtonContent}>
+                  <Ionicons name="water" size={24} color={colors.white} />
+                  <Text style={styles.quickButtonText}>{amount}ml</Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.customAmountContainer}>
+            <Input
+              placeholder="Quantidade personalizada (ml)"
+              value={customAmount}
+              onChangeText={setCustomAmount}
+              keyboardType="numeric"
+              style={styles.customInput}
+              editable={!loading.action}
+              maxLength={4}
+            />
+            <Button
+              title="Adicionar"
+              onPress={handleAddCustomAmount}
+              style={styles.addButton}
+              isLoading={loading.action}
+              disabled={loading.action || !customAmount.trim()}
+              size="medium"
+            />
+          </View>
+        </View>
+
+        {/* Weekly Chart */}
+        {loading.weekly && weeklyData.length === 0 ? (
+          <View style={[globalStyles.card, styles.loadingCard]}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={styles.loadingText}>A carregar dados semanais...</Text>
+          </View>
+        ) : (
+          weeklyData.length > 0 && (
+            <View style={[globalStyles.card, styles.weeklyChart]}>
+              <Text style={styles.sectionTitle}>Esta Semana</Text>
+              <View style={styles.chartContainer}>
+                {weeklyData.map((day, index) => {
+                  const dayProgress = (day.total / currentWaterGoal) * 100;
+                  const barHeight = Math.max(dayProgress, 5);
+
+                  return (
+                    <View key={index} style={styles.dayColumn}>
+                      <Text style={styles.dayAmount}>{day.total}ml</Text>
+                      <View style={styles.barContainer}>
+                        <View
+                          style={[
+                            styles.bar,
+                            {
+                              height: `${barHeight}%`,
+                              backgroundColor: day.isToday
+                                ? colors.primary
+                                : colors.gray[400],
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text
+                        style={[
+                          styles.dayLabel,
+                          day.isToday && styles.todayLabel,
+                        ]}
+                      >
+                        {day.dayName}
+                      </Text>
+                      {dayProgress >= 100 && (
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={16}
+                          color={colors.success}
+                          style={styles.dayComplete}
+                        />
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )
+        )}
+
+        {/* Today's Logs */}
+        {todayLogs.length > 0 && (
+          <View style={[globalStyles.card, styles.logsContainer]}>
+            <View style={styles.logsHeader}>
+              <Text style={styles.sectionTitle}>Registos de Hoje</Text>
+              <Text style={styles.logsCount}>{todayLogs.length} registos</Text>
+            </View>
+
+            {todayLogs.map((log, index) => (
+              <View
+                key={log.id}
+                style={[
+                  styles.logItem,
+                  index === todayLogs.length - 1 && styles.lastLogItem,
+                ]}
+              >
+                <View style={styles.logContent}>
+                  <View style={styles.logIcon}>
+                    <Ionicons name="water" size={20} color={colors.primary} />
+                  </View>
+                  <View style={styles.logInfo}>
+                    <Text style={styles.logAmount}>{log.amount_ml}ml</Text>
+                    <Text style={styles.logTime}>
+                      {formatLogTime(log.logged_at)}
+                    </Text>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => handleDeleteRequest(log)}
+                  style={styles.deleteButton}
+                  disabled={loading.action || isDeleting}
+                  activeOpacity={0.7}
+                >
+                  {loading.action || isDeleting ? (
+                    <ActivityIndicator size="small" color={colors.error} />
+                  ) : (
+                    <Ionicons
+                      name="trash-outline"
+                      size={20}
+                      color={colors.error}
+                    />
+                  )}
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {todayLogs.length === 0 && !loading.today && (
+          <View style={[globalStyles.card, styles.emptyState]}>
+            <Ionicons name="water-outline" size={48} color={colors.gray[400]} />
+            <Text style={styles.emptyStateTitle}>Nenhum registo hoje</Text>
+            <Text style={styles.emptyStateText}>
+              Comece a registar o seu consumo de água para acompanhar o
+              progresso diário
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -327,171 +520,287 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    padding: 20,
   },
   centered: {
-    flex: 1,
     justifyContent: "center",
     alignItems: "center",
   },
+  loadingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 20,
+  },
   loadingText: {
-    marginTop: 10,
-    fontSize: typography.sizes.md,
+    marginLeft: 10,
+    fontSize: typography?.sizes?.md || 16,
     color: colors.textSecondary,
+  },
+  loadingCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 30,
+    marginHorizontal: 20,
+    marginBottom: 20,
   },
   progressCard: {
     alignItems: "center",
+    marginHorizontal: 20,
+    marginTop: 20,
     marginBottom: 20,
+    paddingVertical: 30,
   },
-  title: {
-    fontSize: typography.sizes.xl, // Aumentado
-    fontWeight: typography.weights.bold,
-    color: colors.text,
+  progressHeader: {
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 10,
   },
+  title: {
+    fontSize: typography?.sizes?.xl || 20,
+    fontWeight: typography?.weights?.bold || "bold",
+    color: colors.text,
+    marginLeft: 10,
+  },
+  dateContainer: {
+    marginBottom: 15,
+  },
+  dateText: {
+    fontSize: typography?.sizes?.sm || 14,
+    color: colors.textSecondary,
+    textAlign: "center",
+    textTransform: "capitalize",
+  },
   intakeAmount: {
-    fontSize: typography.sizes.xxxl,
-    fontWeight: typography.weights.bold,
-    color: colors.primary,
-    marginVertical: 5, // Adicionado espaço
+    fontSize: 48,
+    fontWeight: typography?.weights?.bold || "bold",
+    marginVertical: 10,
   },
   goalText: {
-    fontSize: typography.sizes.md,
+    fontSize: typography?.sizes?.md || 16,
     color: colors.textSecondary,
     marginBottom: 20,
   },
-  progressBarContainer: {
+  progressContainer: {
     flexDirection: "row",
     alignItems: "center",
     width: "100%",
+    marginBottom: 15,
+  },
+  progressBarBackground: {
+    flex: 1,
+    height: 12,
+    backgroundColor: colors.gray?.[200] || "#e5e7eb",
+    borderRadius: 6,
+    marginRight: 15,
+    overflow: "hidden",
   },
   progressBar: {
-    flex: 1,
-    height: 10, // Aumentado
-    backgroundColor: colors.gray[200],
-    borderRadius: 5, // Aumentado
-    marginRight: 10,
-  },
-  progressFill: {
     height: "100%",
-    backgroundColor: colors.primary,
-    borderRadius: 5, // Aumentado
+    borderRadius: 6,
   },
   progressText: {
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.semibold,
-    color: colors.text,
-    minWidth: 40, // Aumentado
+    fontSize: typography?.sizes?.md || 16,
+    fontWeight: typography?.weights?.bold || "bold",
+    minWidth: 50,
+    textAlign: "right",
+  },
+  congratsContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.success + "20",
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 10,
+  },
+  congratsText: {
+    fontSize: typography?.sizes?.sm || 14,
+    color: colors.success,
+    fontWeight: typography?.weights?.medium || "500",
+    marginLeft: 5,
   },
   quickActions: {
+    marginHorizontal: 20,
     marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: typography.sizes.lg,
-    fontWeight: typography.weights.bold,
+    fontSize: typography?.sizes?.lg || 18,
+    fontWeight: typography?.weights?.bold || "bold",
     color: colors.text,
-    marginBottom: 15,
+    marginBottom: 20,
   },
   quickButtons: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 25,
+    gap: 15,
   },
   quickButton: {
     backgroundColor: colors.primary,
     flex: 1,
+    borderRadius: 12,
+    paddingVertical: 20,
+    paddingHorizontal: 15,
     alignItems: "center",
-    paddingVertical: 15, // Ajustado
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    marginHorizontal: 5,
-    minHeight: 80, // Altura mínima para consistência
     justifyContent: "center",
+    minHeight: 90,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  quickButtonDisabled: {
+    opacity: 0.6,
+  },
+  quickButtonContent: {
+    alignItems: "center",
   },
   quickButtonText: {
     color: colors.white,
-    fontSize: typography.sizes.sm,
-    fontWeight: typography.weights.semibold,
-    marginTop: 5,
+    fontSize: typography?.sizes?.md || 16,
+    fontWeight: typography?.weights?.semibold || "600",
+    marginTop: 8,
   },
   customAmountContainer: {
     flexDirection: "row",
-    alignItems: "center", // Alinhar itens verticalmente
+    alignItems: "center",
+    gap: 15,
   },
   customInput: {
     flex: 1,
-    marginRight: 10,
-    // marginBottom: 0, // Removido para alinhar com o botão
+    marginBottom: 0,
   },
   addButton: {
-    // minWidth: 100, // Ajustado
-    paddingHorizontal: 20, // Adicionado para melhor toque
+    minWidth: 100,
+    marginBottom: 0,
   },
   weeklyChart: {
+    marginHorizontal: 20,
     marginBottom: 20,
   },
   chartContainer: {
     flexDirection: "row",
     justifyContent: "space-around",
     alignItems: "flex-end",
-    height: 150, // Altura do container do gráfico
-    paddingTop: 10, // Espaço para os valores não cortarem
+    height: 160,
+    paddingTop: 20,
   },
   dayColumn: {
     alignItems: "center",
     flex: 1,
   },
-  barContainer: {
-    height: 100, // Altura máxima da barra
-    width: "80%", // Largura relativa da barra
-    maxWidth: 25, // Largura máxima da barra
-    justifyContent: "flex-end",
-    backgroundColor: colors.gray[100], // Fundo da barra
-    borderRadius: 3,
+  dayAmount: {
+    fontSize: typography?.sizes?.xs || 12,
+    color: colors.text,
+    fontWeight: typography?.weights?.medium || "500",
     marginBottom: 5,
-    overflow: "hidden", // Para garantir que o preenchimento não exceda
+  },
+  barContainer: {
+    height: 100,
+    width: 20,
+    backgroundColor: colors.gray?.[200] || "#e5e7eb",
+    borderRadius: 10,
+    justifyContent: "flex-end",
+    overflow: "hidden",
+    marginBottom: 8,
   },
   bar: {
-    backgroundColor: colors.primary,
-    width: "100%", // Barra preenche o barContainer
-    // height é dinâmico
-    // borderRadius: 2, // Removido, o borderRadius do container é suficiente
+    width: "100%",
+    borderRadius: 10,
+    minHeight: 4,
   },
   dayLabel: {
-    fontSize: typography.sizes.xs,
+    fontSize: typography?.sizes?.xs || 12,
     color: colors.textSecondary,
-    marginBottom: 2,
+    fontWeight: typography?.weights?.medium || "500",
   },
-  dayAmount: {
-    fontSize: typography.sizes.xs,
-    color: colors.text,
-    fontWeight: typography.weights.medium,
+  todayLabel: {
+    color: colors.primary,
+    fontWeight: typography?.weights?.bold || "bold",
+  },
+  dayComplete: {
+    marginTop: 2,
   },
   logsContainer: {
+    marginHorizontal: 20,
     marginBottom: 20,
+  },
+  logsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  logsCount: {
+    fontSize: typography?.sizes?.sm || 14,
+    color: colors.textSecondary,
+    backgroundColor: colors.gray?.[100] || "#f3f4f6",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   logItem: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 12, // Aumentado
+    paddingVertical: 15,
     borderBottomWidth: 1,
-    borderBottomColor: colors.gray[200],
+    borderBottomColor: colors.gray?.[200] || "#e5e7eb",
+  },
+  lastLogItem: {
+    borderBottomWidth: 0,
+  },
+  logContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  logIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primary + "20",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 15,
   },
   logInfo: {
     flex: 1,
   },
   logAmount: {
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.semibold,
+    fontSize: typography?.sizes?.md || 16,
+    fontWeight: typography?.weights?.semibold || "600",
     color: colors.text,
+    marginBottom: 2,
   },
   logTime: {
-    fontSize: typography.sizes.sm,
+    fontSize: typography?.sizes?.sm || 14,
     color: colors.textSecondary,
   },
   deleteButton: {
-    padding: 8, // Aumentado para melhor toque
-    marginLeft: 10,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: colors.error + "10",
+  },
+  emptyState: {
+    alignItems: "center",
+    paddingVertical: 40,
+    marginHorizontal: 20,
+    marginBottom: 20,
+  },
+  emptyStateTitle: {
+    fontSize: typography?.sizes?.lg || 18,
+    fontWeight: typography?.weights?.semibold || "600",
+    color: colors.text,
+    marginTop: 15,
+    marginBottom: 8,
+  },
+  emptyStateText: {
+    fontSize: typography?.sizes?.md || 16,
+    color: colors.textSecondary,
+    textAlign: "center",
+    lineHeight: 22,
   },
 });

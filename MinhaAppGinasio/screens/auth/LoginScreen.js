@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import {
   View,
   Text,
-  Alert,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -12,6 +11,8 @@ import {
 import { supabase } from "../../lib/supabaseClient";
 import Button from "../../components/common/Button";
 import Input from "../../components/common/Input";
+import Toast from "../../components/common/Toast";
+import useToast from "../../hooks/useToast";
 import { colors } from "../../styles/colors";
 import { typography } from "../../styles/typography";
 import { globalStyles } from "../../styles/globalStyles";
@@ -21,6 +22,9 @@ export default function LoginScreen({ navigation }) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+
+  // Hook para toast
+  const { toast, showSuccess, showError, hideToast } = useToast();
 
   function validateForm() {
     const newErrors = {};
@@ -42,69 +46,142 @@ export default function LoginScreen({ navigation }) {
   }
 
   async function handleLogin() {
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      showError("Por favor, corrija os erros no formulário.");
+      return;
+    }
 
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password: password,
-    });
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password,
+      });
 
-    if (error) {
-      Alert.alert("Erro no Login", error.message);
+      if (error) {
+        throw error;
+      }
+
+      showSuccess("Login realizado com sucesso!");
+    } catch (error) {
+      console.error("Login error:", error);
+
+      // Personalizar mensagens de erro
+      let errorMessage = "Erro no login. Tente novamente.";
+
+      if (error.message?.includes("Invalid login credentials")) {
+        errorMessage = "Email ou password incorretos.";
+      } else if (error.message?.includes("Email not confirmed")) {
+        errorMessage = "Por favor, confirme seu email antes de fazer login.";
+      } else if (error.message?.includes("Too many requests")) {
+        errorMessage = "Muitas tentativas. Aguarde alguns minutos.";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      showError(errorMessage);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
+  const clearError = (field) => {
+    if (errors[field]) {
+      setErrors((prev) => ({ ...prev, [field]: null }));
+    }
+  };
+
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
-        <View style={styles.content}>
-          <Text style={styles.title}>Minha App Ginásio</Text>
-          <Text style={styles.subtitle}>Entre na sua conta</Text>
+    <>
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        duration={toast.duration}
+        onHide={hideToast}
+        position="top"
+      />
 
-          <Input
-            label="Email"
-            placeholder="seu@email.com"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            error={errors.email}
-          />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer}>
+          <View style={styles.content}>
+            <Text style={styles.title}>Minha App Ginásio</Text>
+            <Text style={styles.subtitle}>Entre na sua conta</Text>
 
-          <Input
-            label="Password"
-            placeholder="••••••••"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            error={errors.password}
-          />
+            <Input
+              label="Email"
+              placeholder="seu@email.com"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                clearError("email");
+              }}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              error={errors.email}
+              editable={!loading}
+            />
 
-          <Button
-            title="Entrar"
-            onPress={handleLogin}
-            loading={loading}
-            size="large"
-            style={styles.loginButton}
-          />
+            <Input
+              label="Password"
+              placeholder="••••••••"
+              value={password}
+              onChangeText={(text) => {
+                setPassword(text);
+                clearError("password");
+              }}
+              secureTextEntry
+              error={errors.password}
+              editable={!loading}
+            />
 
-          <TouchableOpacity
-            style={styles.linkButton}
-            onPress={() => navigation.navigate("SignUp")}
-          >
-            <Text style={styles.linkText}>
-              Não tem conta?{" "}
-              <Text style={styles.linkTextBold}>Registe-se aqui</Text>
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            <Button
+              title="Entrar"
+              onPress={handleLogin}
+              isLoading={loading}
+              disabled={loading}
+              size="large"
+              style={styles.loginButton}
+            />
+
+            <TouchableOpacity
+              style={[styles.linkButton, loading && styles.disabledLink]}
+              onPress={() => !loading && navigation.navigate("SignUp")}
+              disabled={loading}
+            >
+              <Text style={[styles.linkText, loading && styles.disabledText]}>
+                Não tem conta?{" "}
+                <Text style={styles.linkTextBold}>Registe-se aqui</Text>
+              </Text>
+            </TouchableOpacity>
+
+            {/* Link para recuperação de password (opcional) */}
+            <TouchableOpacity
+              style={[
+                styles.forgotPasswordButton,
+                loading && styles.disabledLink,
+              ]}
+              onPress={() =>
+                !loading && showError("Funcionalidade em desenvolvimento.")
+              }
+              disabled={loading}
+            >
+              <Text
+                style={[
+                  styles.forgotPasswordText,
+                  loading && styles.disabledText,
+                ]}
+              >
+                Esqueceu a password?
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </>
   );
 }
 
@@ -149,5 +226,20 @@ const styles = StyleSheet.create({
   linkTextBold: {
     fontWeight: typography.weights.bold,
     color: colors.primary,
+  },
+  disabledLink: {
+    opacity: 0.6,
+  },
+  disabledText: {
+    color: colors.gray[400],
+  },
+  forgotPasswordButton: {
+    marginTop: 15,
+    alignItems: "center",
+  },
+  forgotPasswordText: {
+    fontSize: typography.sizes.sm,
+    color: colors.primary,
+    textDecorationLine: "underline",
   },
 });

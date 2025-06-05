@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -10,101 +10,34 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { supabase } from "../../lib/supabaseClient";
 import Button from "../../components/common/Button";
 import Input from "../../components/common/Input";
 import Toast from "../../components/common/Toast";
-import LoadingSpinner from "../../components/common/LoadingSpinner";
-import { ConfirmModal } from "../../components/common/Modal";
 import { colors } from "../../styles/colors";
 import { typography } from "../../styles/typography";
 import { globalStyles } from "../../styles/globalStyles";
+import { supabase } from "../../lib/supabaseClient";
 import useToast from "../../hooks/useToast";
 
-export default function EditExerciseScreen({ route, navigation }) {
-  const { exerciseId, workoutId } = route.params;
+export default function AddExerciseScreen({ route, navigation }) {
+  const { workoutId, workoutName } = route.params;
 
-  const [exercise, setExercise] = useState({
-    name: "",
-    exercise_type: "strength",
-    notes: "",
-  });
-  const [sets, setSets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [exerciseName, setExerciseName] = useState("");
+  const [exerciseType, setExerciseType] = useState("strength");
+  const [exerciseNotes, setExerciseNotes] = useState("");
+  const [sets, setSets] = useState([
+    {
+      id: `set-${Date.now()}-1`,
+      setNumber: 1,
+      reps: "",
+      weight_kg: "",
+      notes: "",
+    },
+  ]);
+  const [isSaving, setIsSaving] = useState(false);
   const [formErrors, setFormErrors] = useState({});
 
   const { toast, showSuccess, showError, showWarning, hideToast } = useToast();
-
-  useEffect(() => {
-    loadExercise();
-  }, [exerciseId]);
-
-  async function loadExercise() {
-    try {
-      // Carregar exercício com suas séries
-      const { data: exerciseData, error: exerciseError } = await supabase
-        .from("exercises")
-        .select(
-          `
-          *,
-          exercise_sets (
-            id,
-            set_number,
-            reps,
-            weight_kg,
-            notes
-          )
-        `
-        )
-        .eq("id", exerciseId)
-        .single();
-
-      if (exerciseError) throw exerciseError;
-
-      setExercise({
-        name: exerciseData.name || "",
-        exercise_type: exerciseData.exercise_type || "strength",
-        notes: exerciseData.notes || "",
-      });
-
-      // Ordenar séries por número e configurar estados
-      const sortedSets = (exerciseData.exercise_sets || [])
-        .sort((a, b) => a.set_number - b.set_number)
-        .map((set) => ({
-          id: set.id,
-          setNumber: set.set_number,
-          reps: set.reps?.toString() || "",
-          weight_kg: set.weight_kg?.toString() || "",
-          notes: set.notes || "",
-          isExisting: true, // Marca que é uma série existente no banco
-        }));
-
-      // Se não há séries, criar uma padrão
-      if (sortedSets.length === 0) {
-        setSets([
-          {
-            id: `new-set-${Date.now()}-1`,
-            setNumber: 1,
-            reps: "",
-            weight_kg: "",
-            notes: "",
-            isExisting: false,
-          },
-        ]);
-      } else {
-        setSets(sortedSets);
-      }
-    } catch (error) {
-      console.error("Error loading exercise:", error);
-      showError("Não foi possível carregar o exercício.");
-      navigation.goBack();
-    } finally {
-      setLoading(false);
-    }
-  }
 
   const clearError = (field) => {
     setFormErrors((prevErrors) => {
@@ -114,45 +47,34 @@ export default function EditExerciseScreen({ route, navigation }) {
     });
   };
 
-  const updateExercise = (field, value) => {
-    setExercise((prev) => ({ ...prev, [field]: value }));
-    if (field === "name") {
-      clearError("exerciseName");
-    }
-  };
-
   const addSet = () => {
-    if (saving || deleting) return;
+    if (isSaving) return;
 
     const newSetNumber = sets.length + 1;
     const newSet = {
-      id: `new-set-${Date.now()}-${newSetNumber}`,
+      id: `set-${Date.now()}-${newSetNumber}`,
       setNumber: newSetNumber,
       reps: "",
       weight_kg: "",
       notes: "",
-      isExisting: false, // Marca como nova série
     };
     setSets([...sets, newSet]);
     showSuccess("Série adicionada!", 1500);
   };
 
   const removeSet = (setId) => {
-    if (saving || deleting || sets.length <= 1) return;
+    if (isSaving || sets.length <= 1) return;
 
     const updatedSets = sets
       .filter((set) => set.id !== setId)
-      .map((set, index) => ({
-        ...set,
-        setNumber: index + 1,
-        isExisting: false, // Marca como modificada para forçar recriação
-      }));
+      .map((set, index) => ({ ...set, setNumber: index + 1 }));
 
     setSets(updatedSets);
     showWarning("Série removida.", 1500);
   };
+
   const updateSet = (setId, field, value) => {
-    if (saving || deleting) return;
+    if (isSaving) return;
 
     setSets(
       sets.map((set) => (set.id === setId ? { ...set, [field]: value } : set))
@@ -162,7 +84,7 @@ export default function EditExerciseScreen({ route, navigation }) {
   const validateForm = () => {
     const errors = {};
 
-    if (!exercise.name.trim()) {
+    if (!exerciseName.trim()) {
       errors.exerciseName = "O nome do exercício é obrigatório.";
     }
 
@@ -176,120 +98,95 @@ export default function EditExerciseScreen({ route, navigation }) {
   };
 
   const saveExercise = async () => {
-    if (!validateForm()) return;
+    if (!validateForm()) {
+      return;
+    }
 
-    setSaving(true);
+    setIsSaving(true);
+
     try {
-      // 1. Atualizar exercício
-      const exerciseUpdateData = {
-        name: exercise.name.trim(),
+      // 1. Inserir o exercício
+      const exerciseToInsert = {
+        workout_id: workoutId,
+        name: exerciseName.trim(),
         total_sets: sets.length,
-        exercise_type: exercise.exercise_type,
-        notes: exercise.notes.trim(),
+        exercise_type: exerciseType,
+        notes: exerciseNotes.trim(),
       };
 
-      const { error: exerciseError } = await supabase
+      console.log("📤 Inserting exercise:", exerciseToInsert);
+
+      const { data: createdExercise, error: exerciseError } = await supabase
         .from("exercises")
-        .update(exerciseUpdateData)
-        .eq("id", exerciseId);
+        .insert([exerciseToInsert])
+        .select()
+        .single();
 
-      if (exerciseError) throw exerciseError;
-
-      // 2. Primeiro, remover TODAS as séries existentes do exercício
-      const { error: deleteAllError } = await supabase
-        .from("exercise_sets")
-        .delete()
-        .eq("exercise_id", exerciseId);
-
-      if (deleteAllError) throw deleteAllError;
-
-      // 3. Inserir todas as séries como novas (mais simples e confiável)
-      if (sets.length > 0) {
-        const setsToInsert = sets
-          .filter((set) => set.reps || set.weight_kg) // Só inserir séries com dados
-          .map((set, index) => ({
-            exercise_id: exerciseId,
-            set_number: index + 1, // Renumerar sequencialmente
-            reps: set.reps ? parseInt(set.reps, 10) : null,
-            weight_kg: set.weight_kg
-              ? parseFloat(set.weight_kg.replace(",", "."))
-              : null,
-            notes: set.notes?.trim() || null,
-          }));
-
-        if (setsToInsert.length > 0) {
-          const { error: insertError } = await supabase
-            .from("exercise_sets")
-            .insert(setsToInsert);
-
-          if (insertError) throw insertError;
-        }
+      if (exerciseError) {
+        console.log("❌ Error creating exercise:", exerciseError);
+        throw exerciseError;
       }
 
-      showSuccess("Exercício atualizado com sucesso! 🎉", 3000);
+      console.log("✅ Exercise created:", {
+        id: createdExercise.id,
+        name: createdExercise.name,
+      });
+
+      // 2. Inserir as séries
+      const setsToInsert = sets.map((set) => ({
+        exercise_id: createdExercise.id,
+        set_number: set.setNumber,
+        reps: set.reps ? parseInt(set.reps, 10) : null,
+        weight_kg: set.weight_kg
+          ? parseFloat(set.weight_kg.replace(",", "."))
+          : null,
+        notes: set.notes.trim(),
+      }));
+
+      console.log("📤 Inserting exercise sets:", {
+        exerciseId: createdExercise.id,
+        setsCount: setsToInsert.length,
+      });
+
+      const { error: setsError } = await supabase
+        .from("exercise_sets")
+        .insert(setsToInsert);
+
+      if (setsError) {
+        console.log("❌ Error creating exercise sets:", setsError);
+        throw setsError;
+      }
+
+      console.log("✅ Exercise and sets created successfully");
+      showSuccess("Exercício adicionado com sucesso! 🎉", 3000);
 
       // Chamar callback se fornecido
-      if (route.params?.onExerciseUpdated) {
-        console.log("🔄 Calling onExerciseUpdated callback");
-        route.params.onExerciseUpdated();
+      if (route.params?.onExerciseAdded) {
+        console.log("🔄 Calling onExerciseAdded callback");
+        route.params.onExerciseAdded();
       }
 
-      setTimeout(() => navigation.goBack(), 1500);
+      setTimeout(() => {
+        navigation.goBack();
+      }, 1500);
     } catch (error) {
-      console.error("Error updating exercise:", error);
-      showError("Não foi possível atualizar o exercício.", 5000);
+      console.error("Error saving exercise:", error);
+
+      const errorMessage =
+        error.message ||
+        "Não foi possível guardar o exercício. Verifique sua conexão e tente novamente.";
+      showError(errorMessage, 5000);
     } finally {
-      setSaving(false);
+      setIsSaving(false);
     }
-  };
-
-  const handleDeleteRequest = () => {
-    setShowDeleteModal(true);
-  };
-
-  const confirmDelete = async () => {
-    setShowDeleteModal(false);
-    setDeleting(true);
-
-    try {
-      // O CASCADE vai apagar automaticamente as exercise_sets
-      const { error } = await supabase
-        .from("exercises")
-        .delete()
-        .eq("id", exerciseId);
-
-      if (error) throw error;
-
-      showSuccess("Exercício apagado com sucesso!", 3000);
-
-      // Chamar callback se fornecido (para recarregar após apagar)
-      if (route.params?.onExerciseUpdated) {
-        console.log("🔄 Calling onExerciseUpdated callback after delete");
-        route.params.onExerciseUpdated();
-      }
-
-      setTimeout(() => navigation.goBack(), 1500);
-    } catch (error) {
-      console.error("Error deleting exercise:", error);
-      showError("Não foi possível apagar o exercício.", 5000);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const cancelDelete = () => {
-    setShowDeleteModal(false);
   };
 
   const handleGoBack = () => {
-    const hasChanges =
-      exercise.name !== "" ||
-      exercise.notes !== "" ||
-      sets.some((set) => set.reps || set.weight_kg || set.notes);
-
-    if (hasChanges) {
-      showWarning("Alterações não salvas serão perdidas.", 3000);
-      setTimeout(() => navigation.goBack(), 1000);
+    if (exerciseName.trim() || sets.some((set) => set.reps || set.weight_kg)) {
+      showWarning("Dados não salvos serão perdidos.", 3000);
+      setTimeout(() => {
+        navigation.goBack();
+      }, 1000);
     } else {
       navigation.goBack();
     }
@@ -305,7 +202,7 @@ export default function EditExerciseScreen({ route, navigation }) {
         onChangeText={(value) => updateSet(set.id, "reps", value)}
         keyboardType="numeric"
         style={styles.setInput}
-        editable={!saving && !deleting}
+        editable={!isSaving}
       />
 
       <Input
@@ -314,32 +211,24 @@ export default function EditExerciseScreen({ route, navigation }) {
         onChangeText={(value) => updateSet(set.id, "weight_kg", value)}
         keyboardType="decimal-pad"
         style={styles.setInput}
-        editable={!saving && !deleting}
+        editable={!isSaving}
       />
 
       {sets.length > 1 && (
         <TouchableOpacity
           onPress={() => removeSet(set.id)}
           style={styles.removeSetButton}
-          disabled={saving || deleting}
+          disabled={isSaving}
         >
           <Ionicons
             name="remove-circle"
             size={20}
-            color={saving || deleting ? colors.gray[300] : colors.error}
+            color={isSaving ? colors.gray[300] : colors.error}
           />
         </TouchableOpacity>
       )}
     </View>
   );
-
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <LoadingSpinner text="A carregar exercício..." />
-      </View>
-    );
-  }
 
   return (
     <KeyboardAvoidingView
@@ -356,62 +245,46 @@ export default function EditExerciseScreen({ route, navigation }) {
         position="top"
       />
 
-      {/* Delete Confirmation Modal */}
-      <ConfirmModal
-        visible={showDeleteModal}
-        onClose={cancelDelete}
-        onConfirm={confirmDelete}
-        title="Confirmar Exclusão"
-        message={`Tem certeza que deseja apagar o exercício "${exercise.name}"? Esta ação não pode ser desfeita.`}
-        confirmText="Apagar"
-        cancelText="Cancelar"
-        type="error"
-        confirmButtonStyle={{ backgroundColor: colors.error }}
-        isLoading={deleting}
-      />
-
-      {(saving || deleting) && (
+      {isSaving && (
         <View style={styles.savingOverlay}>
           <ActivityIndicator size="large" color={colors.white} />
-          <Text style={styles.savingText}>
-            {saving ? "A guardar exercício..." : "A apagar exercício..."}
-          </Text>
+          <Text style={styles.savingText}>A guardar exercício...</Text>
         </View>
       )}
 
       <ScrollView
-        style={[
-          styles.scrollContainer,
-          (saving || deleting) && styles.disabledScroll,
-        ]}
+        style={[styles.scrollContainer, isSaving && styles.disabledScroll]}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-        scrollEnabled={!saving && !deleting}
+        contentContainerStyle={styles.scrollContentContainer}
+        scrollEnabled={!isSaving}
       >
         <View style={styles.content}>
           {/* Header */}
           <View style={[globalStyles.card, styles.headerCard]}>
             <View style={styles.headerContent}>
-              <Ionicons name="create" size={32} color={colors.primary} />
+              <Ionicons name="add-circle" size={32} color={colors.primary} />
               <View style={styles.headerText}>
-                <Text style={styles.headerTitle}>Editar Exercício</Text>
+                <Text style={styles.headerTitle}>Adicionar Exercício</Text>
                 <Text style={styles.headerSubtitle}>
-                  Atualize as informações e séries
+                  ao treino {workoutName}
                 </Text>
               </View>
             </View>
           </View>
 
           {/* Exercise Info */}
-          <View style={[globalStyles.card, styles.exerciseCard]}>
+          <View style={[globalStyles.card, styles.exerciseInfoCard]}>
             <Text style={styles.sectionTitle}>Informações do Exercício</Text>
 
             <Input
               label="Nome do Exercício"
               placeholder="Ex: Supino Reto"
-              value={exercise.name}
-              onChangeText={(value) => updateExercise("name", value)}
-              editable={!saving && !deleting}
+              value={exerciseName}
+              onChangeText={(text) => {
+                setExerciseName(text);
+                clearError("exerciseName");
+              }}
+              editable={!isSaving}
               error={formErrors.exerciseName}
             />
 
@@ -431,22 +304,17 @@ export default function EditExerciseScreen({ route, navigation }) {
                     key={type.value}
                     style={[
                       styles.typeButton,
-                      exercise.exercise_type === type.value &&
-                        styles.typeButtonActive,
-                      (saving || deleting) && styles.typeButtonDisabled,
+                      exerciseType === type.value && styles.typeButtonActive,
+                      isSaving && styles.typeButtonDisabled,
                     ]}
-                    onPress={() =>
-                      !saving &&
-                      !deleting &&
-                      updateExercise("exercise_type", type.value)
-                    }
-                    disabled={saving || deleting}
+                    onPress={() => !isSaving && setExerciseType(type.value)}
+                    disabled={isSaving}
                   >
                     <Ionicons
                       name={type.icon}
                       size={16}
                       color={
-                        exercise.exercise_type === type.value
+                        exerciseType === type.value
                           ? colors.white
                           : colors.textSecondary
                       }
@@ -454,7 +322,7 @@ export default function EditExerciseScreen({ route, navigation }) {
                     <Text
                       style={[
                         styles.typeButtonText,
-                        exercise.exercise_type === type.value &&
+                        exerciseType === type.value &&
                           styles.typeButtonTextActive,
                       ]}
                     >
@@ -468,11 +336,11 @@ export default function EditExerciseScreen({ route, navigation }) {
             <Input
               label="Notas (opcional)"
               placeholder="Observações sobre o exercício..."
-              value={exercise.notes}
-              onChangeText={(value) => updateExercise("notes", value)}
+              value={exerciseNotes}
+              onChangeText={setExerciseNotes}
               multiline
               numberOfLines={2}
-              editable={!saving && !deleting}
+              editable={!isSaving}
             />
           </View>
 
@@ -484,20 +352,17 @@ export default function EditExerciseScreen({ route, navigation }) {
                 onPress={addSet}
                 style={[
                   styles.addSetButton,
-                  (saving || deleting) && styles.addSetButtonDisabled,
+                  isSaving && styles.addSetButtonDisabled,
                 ]}
-                disabled={saving || deleting}
+                disabled={isSaving}
               >
                 <Ionicons
                   name="add-circle"
                   size={20}
-                  color={saving || deleting ? colors.gray[300] : colors.primary}
+                  color={isSaving ? colors.gray[300] : colors.primary}
                 />
                 <Text
-                  style={[
-                    styles.addSetText,
-                    (saving || deleting) && styles.disabledText,
-                  ]}
+                  style={[styles.addSetText, isSaving && styles.disabledText]}
                 >
                   Adicionar Série
                 </Text>
@@ -512,34 +377,32 @@ export default function EditExerciseScreen({ route, navigation }) {
             </View>
 
             {sets.map((set, setIndex) => renderSet(set, setIndex))}
+
+            {sets.length === 0 && (
+              <View style={styles.noSetsContainer}>
+                <Text style={styles.noSetsText}>
+                  Nenhuma série adicionada ainda
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </ScrollView>
 
       <View style={styles.bottomButtons}>
         <Button
-          title="Apagar"
-          variant="outline"
-          onPress={handleDeleteRequest}
-          style={[styles.button, styles.deleteButton]}
-          disabled={saving || deleting}
-          icon={
-            <Ionicons name="trash-outline" size={18} color={colors.error} />
-          }
-        />
-        <Button
           title="Cancelar"
-          variant="secondary"
+          variant="outline"
           onPress={handleGoBack}
-          style={styles.button}
-          disabled={saving || deleting}
+          style={styles.cancelButton}
+          disabled={isSaving}
         />
         <Button
-          title="Guardar"
+          title="Guardar Exercício"
           onPress={saveExercise}
-          isLoading={saving}
-          style={styles.button}
-          disabled={saving || deleting}
+          isLoading={isSaving}
+          style={styles.saveButton}
+          disabled={isSaving}
         />
       </View>
     </KeyboardAvoidingView>
@@ -571,7 +434,7 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flex: 1,
   },
-  scrollContent: {
+  scrollContentContainer: {
     paddingBottom: 120,
   },
   disabledScroll: {
@@ -605,7 +468,7 @@ const styles = StyleSheet.create({
   },
 
   // Exercise Info
-  exerciseCard: {
+  exerciseInfoCard: {
     marginBottom: 20,
   },
   sectionTitle: {
@@ -725,6 +588,15 @@ const styles = StyleSheet.create({
   removeSetButton: {
     padding: 4,
   },
+  noSetsContainer: {
+    alignItems: "center",
+    paddingVertical: 20,
+  },
+  noSetsText: {
+    fontSize: typography.sizes.md,
+    color: colors.textSecondary,
+    textAlign: "center",
+  },
 
   // Bottom Buttons
   bottomButtons: {
@@ -746,11 +618,13 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 8,
   },
-  button: {
+  cancelButton: {
     flex: 1,
-    marginHorizontal: 5,
+    marginRight: 10,
+    borderColor: colors.gray[400],
   },
-  deleteButton: {
-    borderColor: colors.error,
+  saveButton: {
+    flex: 2,
+    marginLeft: 10,
   },
 });

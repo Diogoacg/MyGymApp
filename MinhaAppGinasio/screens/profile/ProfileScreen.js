@@ -5,13 +5,16 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { AuthContext } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabaseClient";
 import Button from "../../components/common/Button";
+import { ConfirmModal } from "../../components/common/Modal";
+import Toast from "../../components/common/Toast";
+import useModal from "../../hooks/useModal";
+import useToast from "../../hooks/useToast";
 import { colors } from "../../styles/colors";
 import { typography } from "../../styles/typography";
 import { globalStyles } from "../../styles/globalStyles";
@@ -20,6 +23,11 @@ export default function ProfileScreen({ navigation }) {
   const { user, signOut } = useContext(AuthContext);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [signOutLoading, setSignOutLoading] = useState(false);
+
+  // Hooks para modal e toast
+  const { showConfirm, visible, config, hideModal } = useModal();
+  const { toast, showSuccess, showError, hideToast } = useToast();
 
   useEffect(() => {
     if (user) {
@@ -44,20 +52,33 @@ export default function ProfileScreen({ navigation }) {
       );
     } catch (error) {
       console.error("Error loading profile:", error);
+      showError("Erro ao carregar perfil. Tente novamente.");
     } finally {
       setLoading(false);
     }
   }
 
   const handleSignOut = () => {
-    Alert.alert("Sair", "Tem certeza que deseja sair da aplicação?", [
-      { text: "Cancelar", style: "cancel" },
-      {
-        text: "Sair",
-        style: "destructive",
-        onPress: signOut,
+    showConfirm({
+      title: "Sair da Conta",
+      message:
+        "Tem certeza que deseja sair da aplicação? Você precisará fazer login novamente para acessar seus dados.",
+      confirmText: "Sair",
+      cancelText: "Cancelar",
+      type: "warning",
+      onConfirm: async () => {
+        setSignOutLoading(true);
+        try {
+          await signOut();
+          showSuccess("Logout realizado com sucesso!");
+        } catch (error) {
+          console.error("Error signing out:", error);
+          showError("Erro ao fazer logout. Tente novamente.");
+        } finally {
+          setSignOutLoading(false);
+        }
       },
-    ]);
+    });
   };
 
   const menuItems = [
@@ -86,6 +107,7 @@ export default function ProfileScreen({ navigation }) {
       key={index}
       style={[globalStyles.card, styles.menuItem]}
       onPress={item.onPress}
+      disabled={signOutLoading}
     >
       <View style={styles.menuContent}>
         <View style={styles.menuIcon}>
@@ -109,33 +131,61 @@ export default function ProfileScreen({ navigation }) {
   }
 
   return (
-    <ScrollView style={styles.container}>
-      {/* Header do Perfil */}
-      <View style={[globalStyles.card, styles.profileHeader]}>
-        <View style={styles.avatarContainer}>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={40} color={colors.primary} />
+    <>
+      <Toast
+        visible={toast.visible}
+        message={toast.message}
+        type={toast.type}
+        duration={toast.duration}
+        onHide={hideToast}
+        position="top"
+      />
+
+      <ConfirmModal
+        visible={visible && config.content?.type === "confirm"}
+        onClose={hideModal}
+        title={config.title}
+        message={config.content?.message}
+        confirmText={config.content?.confirmText}
+        cancelText={config.content?.cancelText}
+        type={config.type}
+        onConfirm={config.content?.onConfirm}
+        isLoading={signOutLoading}
+      />
+
+      <ScrollView style={styles.container}>
+        {/* Header do Perfil */}
+        <View style={[globalStyles.card, styles.profileHeader]}>
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatar}>
+              <Ionicons name="person" size={40} color={colors.primary} />
+            </View>
           </View>
+          <Text style={styles.profileName}>
+            {profile?.full_name || user?.email || "Usuário"}
+          </Text>
+          <Text style={styles.profileEmail}>{user?.email}</Text>
         </View>
-        <Text style={styles.profileName}>
-          {profile?.full_name || user?.email || "Usuário"}
-        </Text>
-        <Text style={styles.profileEmail}>{user?.email}</Text>
-      </View>
 
-      {/* Menu Items */}
-      <View style={styles.menuSection}>{menuItems.map(renderMenuItem)}</View>
+        {/* Menu Items */}
+        <View style={styles.menuSection}>{menuItems.map(renderMenuItem)}</View>
 
-      {/* Botão de Sair */}
-      <View style={styles.signOutSection}>
-        <Button
-          title="Sair da Conta"
-          onPress={handleSignOut}
-          variant="outline"
-          style={styles.signOutButton}
-        />
-      </View>
-    </ScrollView>
+        {/* Botão de Sair */}
+        <View style={styles.signOutSection}>
+          <Button
+            title="Sair da Conta"
+            onPress={handleSignOut}
+            variant="outline"
+            style={[
+              styles.signOutButton,
+              signOutLoading && styles.disabledButton,
+            ]}
+            disabled={signOutLoading}
+            isLoading={signOutLoading}
+          />
+        </View>
+      </ScrollView>
+    </>
   );
 }
 
@@ -213,5 +263,8 @@ const styles = StyleSheet.create({
   },
   signOutButton: {
     borderColor: colors.error,
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 });

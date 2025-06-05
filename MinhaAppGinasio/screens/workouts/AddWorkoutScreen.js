@@ -16,20 +16,16 @@ import Toast from "../../components/common/Toast";
 import { colors } from "../../styles/colors";
 import { typography } from "../../styles/typography";
 import { globalStyles } from "../../styles/globalStyles";
-import useWorkouts from "../../hooks/useWorkouts";
+import { supabase } from "../../lib/supabaseClient";
 import useToast from "../../hooks/useToast";
 
 export default function AddWorkoutScreen({ navigation }) {
   const [workoutName, setWorkoutName] = useState("");
-  const [workoutDate, setWorkoutDate] = useState(
-    new Date().toISOString().split("T")[0]
-  );
   const [workoutNotes, setWorkoutNotes] = useState("");
   const [exercises, setExercises] = useState([]);
   const [isSaving, setIsSaving] = useState(false);
   const [formErrors, setFormErrors] = useState({});
 
-  const { createWorkout, loading: workoutsHookLoading } = useWorkouts();
   const { toast, showSuccess, showError, showWarning, hideToast } = useToast();
 
   const clearError = (field) => {
@@ -40,33 +36,33 @@ export default function AddWorkoutScreen({ navigation }) {
     });
   };
 
-  const clearExerciseNameError = (exerciseId) => {
-    setFormErrors((prevErrors) => {
-      const newExerciseErrors = { ...(prevErrors.exerciseNames || {}) };
-      delete newExerciseErrors[exerciseId];
-      return {
-        ...prevErrors,
-        exerciseNames: newExerciseErrors,
-      };
-    });
-  };
-
   const addExercise = () => {
     if (isSaving) return;
 
     const newExercise = {
-      id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `exercise-${Date.now()}`,
       name: "",
-      sets: "",
-      reps: "",
-      weight_kg: "",
+      exercise_type: "strength",
       notes: "",
+      sets: [
+        {
+          id: `set-${Date.now()}-1`,
+          setNumber: 1,
+          reps: "",
+          weight_kg: "",
+          notes: "",
+        },
+      ],
     };
-    setExercises([...exercises, newExercise]);
-    clearError("exercisesGlobal");
 
-    // Toast de feedback
-    showSuccess("Exercício adicionado! Preencha os dados.", 2000);
+    setExercises([...exercises, newExercise]);
+    showSuccess("Exercício adicionado!", 1500);
+  };
+
+  const removeExercise = (exerciseId) => {
+    if (isSaving) return;
+    setExercises(exercises.filter((exercise) => exercise.id !== exerciseId));
+    showWarning("Exercício removido.", 1500);
   };
 
   const updateExercise = (exerciseId, field, value) => {
@@ -76,18 +72,58 @@ export default function AddWorkoutScreen({ navigation }) {
         exercise.id === exerciseId ? { ...exercise, [field]: value } : exercise
       )
     );
-    if (field === "name") {
-      clearExerciseNameError(exerciseId);
-    }
   };
 
-  const removeExercise = (exerciseId) => {
+  const addSetToExercise = (exerciseId) => {
     if (isSaving) return;
-    setExercises(exercises.filter((exercise) => exercise.id !== exerciseId));
-    clearExerciseNameError(exerciseId);
+    setExercises(
+      exercises.map((exercise) => {
+        if (exercise.id === exerciseId) {
+          const newSetNumber = exercise.sets.length + 1;
+          const newSet = {
+            id: `set-${Date.now()}-${newSetNumber}`,
+            setNumber: newSetNumber,
+            reps: "",
+            weight_kg: "",
+            notes: "",
+          };
+          return { ...exercise, sets: [...exercise.sets, newSet] };
+        }
+        return exercise;
+      })
+    );
+  };
 
-    // Toast de feedback
-    showWarning("Exercício removido.", 2000);
+  const removeSetFromExercise = (exerciseId, setId) => {
+    if (isSaving) return;
+    setExercises(
+      exercises.map((exercise) => {
+        if (exercise.id === exerciseId && exercise.sets.length > 1) {
+          const updatedSets = exercise.sets
+            .filter((set) => set.id !== setId)
+            .map((set, index) => ({ ...set, setNumber: index + 1 }));
+          return { ...exercise, sets: updatedSets };
+        }
+        return exercise;
+      })
+    );
+  };
+
+  const updateExerciseSet = (exerciseId, setId, field, value) => {
+    if (isSaving) return;
+    setExercises(
+      exercises.map((exercise) => {
+        if (exercise.id === exerciseId) {
+          return {
+            ...exercise,
+            sets: exercise.sets.map((set) =>
+              set.id === setId ? { ...set, [field]: value } : set
+            ),
+          };
+        }
+        return exercise;
+      })
+    );
   };
 
   const validateForm = () => {
@@ -97,26 +133,16 @@ export default function AddWorkoutScreen({ navigation }) {
       errors.workoutName = "O nome do treino é obrigatório.";
     }
 
-    if (exercises.length === 0) {
-      errors.exercisesGlobal = "Adicione pelo menos um exercício.";
-    }
-
-    const exerciseNameErrors = {};
     exercises.forEach((exercise, index) => {
       if (!exercise.name.trim()) {
-        exerciseNameErrors[exercise.id] = `O nome do Exercício ${
+        errors[`exercise_${exercise.id}`] = `Nome do exercício ${
           index + 1
         } é obrigatório.`;
       }
     });
 
-    if (Object.keys(exerciseNameErrors).length > 0) {
-      errors.exerciseNames = exerciseNameErrors;
-    }
-
     setFormErrors(errors);
 
-    // Mostrar toast de erro se houver problemas
     if (Object.keys(errors).length > 0) {
       showError("Por favor, corrija os erros indicados no formulário.", 4000);
     }
@@ -132,42 +158,106 @@ export default function AddWorkoutScreen({ navigation }) {
     setIsSaving(true);
 
     try {
-      const workoutData = {
-        name: workoutName.trim(),
-        date: workoutDate,
-        notes: workoutNotes.trim(),
-      };
+      // Obter o usuário atual
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
 
-      const exercisesToSave = exercises.map((ex) => ({
-        name: ex.name.trim(),
-        sets: ex.sets ? parseInt(ex.sets, 10) : null,
-        reps: ex.reps ? parseInt(ex.reps, 10) : null,
-        weight_kg: ex.weight_kg
-          ? parseFloat(ex.weight_kg.replace(",", "."))
-          : null,
-        notes: ex.notes.trim(),
-      }));
-
-      const result = await createWorkout(workoutData, exercisesToSave);
-
-      if (result.error) {
-        throw result.error;
+      if (userError || !user) {
+        throw new Error("Usuário não autenticado");
       }
 
-      // Toast de sucesso
-      showSuccess("Treino guardado com sucesso! 🎉", 3000);
+      // 1. Criar o treino - incluindo user_id obrigatório para RLS
+      const workoutToInsert = {
+        user_id: user.id, // Campo obrigatório para RLS
+        name: workoutName.trim(),
+        notes: workoutNotes.trim() || null,
+        date: new Date().toISOString().split("T")[0], // Data atual no formato YYYY-MM-DD
+      };
 
-      // Navegar de volta após pequeno delay
+      console.log("📤 Inserting workout:", workoutToInsert);
+
+      const { data: createdWorkout, error: workoutError } = await supabase
+        .from("workouts")
+        .insert([workoutToInsert])
+        .select()
+        .single();
+
+      if (workoutError) {
+        console.log("❌ Error creating workout:", workoutError);
+        throw workoutError;
+      }
+
+      console.log("✅ Workout created:", {
+        id: createdWorkout.id,
+        name: createdWorkout.name,
+      });
+
+      // 2. Criar os exercícios e suas séries
+      for (const exercise of exercises) {
+        if (!exercise.name.trim()) continue;
+
+        // Inserir exercício
+        const exerciseToInsert = {
+          workout_id: createdWorkout.id,
+          name: exercise.name.trim(),
+          total_sets: exercise.sets.length,
+          exercise_type: exercise.exercise_type,
+          notes: exercise.notes.trim() || null,
+          exercise_order: exercises.indexOf(exercise),
+        };
+
+        const { data: createdExercise, error: exerciseError } = await supabase
+          .from("exercises")
+          .insert([exerciseToInsert])
+          .select()
+          .single();
+
+        if (exerciseError) {
+          console.log("❌ Error creating exercise:", exerciseError);
+          throw exerciseError;
+        }
+
+        // Inserir séries do exercício
+        const setsToInsert = exercise.sets.map((set) => ({
+          exercise_id: createdExercise.id,
+          set_number: set.setNumber,
+          reps: set.reps ? parseInt(set.reps, 10) : null,
+          weight_kg: set.weight_kg
+            ? parseFloat(set.weight_kg.replace(",", "."))
+            : null,
+          notes: set.notes.trim() || null,
+        }));
+
+        const { error: setsError } = await supabase
+          .from("exercise_sets")
+          .insert(setsToInsert);
+
+        if (setsError) {
+          console.log("❌ Error creating exercise sets:", setsError);
+          throw setsError;
+        }
+      }
+
+      console.log("✅ Workout and exercises created successfully");
+      showSuccess("Treino criado com sucesso! 🎉", 3000);
+
       setTimeout(() => {
         navigation.goBack();
       }, 1500);
     } catch (error) {
-      console.error("Error saving workout via hook:", error);
+      console.error("Error saving workout:", error);
 
-      // Toast de erro específico
-      const errorMessage =
-        error.message ||
-        "Não foi possível guardar o treino. Verifique sua conexão e tente novamente.";
+      let errorMessage =
+        "Não foi possível criar o treino. Verifique sua conexão e tente novamente.";
+
+      if (error.message === "Usuário não autenticado") {
+        errorMessage = "Você precisa estar logado para criar treinos.";
+      } else if (error.code === "42501") {
+        errorMessage = "Permissão negada. Verifique se você está logado.";
+      }
+
       showError(errorMessage, 5000);
     } finally {
       setIsSaving(false);
@@ -175,7 +265,7 @@ export default function AddWorkoutScreen({ navigation }) {
   };
 
   const handleGoBack = () => {
-    if (exercises.length > 0 || workoutName.trim()) {
+    if (workoutName.trim() || exercises.length > 0) {
       showWarning("Dados não salvos serão perdidos.", 3000);
       setTimeout(() => {
         navigation.goBack();
@@ -185,13 +275,55 @@ export default function AddWorkoutScreen({ navigation }) {
     }
   };
 
-  const renderExercise = (exercise, index) => (
+  const renderExerciseSet = (exercise, set, setIndex) => (
+    <View key={set.id} style={styles.setRow}>
+      <Text style={styles.setNumber}>{set.setNumber}</Text>
+
+      <Input
+        placeholder="Reps"
+        value={set.reps}
+        onChangeText={(value) =>
+          updateExerciseSet(exercise.id, set.id, "reps", value)
+        }
+        keyboardType="numeric"
+        style={styles.setInput}
+        editable={!isSaving}
+      />
+
+      <Input
+        placeholder="Peso (kg)"
+        value={set.weight_kg}
+        onChangeText={(value) =>
+          updateExerciseSet(exercise.id, set.id, "weight_kg", value)
+        }
+        keyboardType="decimal-pad"
+        style={styles.setInput}
+        editable={!isSaving}
+      />
+
+      {exercise.sets.length > 1 && (
+        <TouchableOpacity
+          onPress={() => removeSetFromExercise(exercise.id, set.id)}
+          style={styles.removeSetButton}
+          disabled={isSaving}
+        >
+          <Ionicons
+            name="remove-circle"
+            size={20}
+            color={isSaving ? colors.gray[300] : colors.error}
+          />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  const renderExercise = (exercise, exerciseIndex) => (
     <View key={exercise.id} style={[globalStyles.card, styles.exerciseCard]}>
       <View style={styles.exerciseHeader}>
-        <Text style={styles.exerciseTitle}>Exercício {index + 1}</Text>
+        <Text style={styles.exerciseTitle}>Exercício {exerciseIndex + 1}</Text>
         <TouchableOpacity
           onPress={() => removeExercise(exercise.id)}
-          style={styles.removeButton}
+          style={styles.removeExerciseButton}
           disabled={isSaving}
         >
           <Ionicons
@@ -206,52 +338,102 @@ export default function AddWorkoutScreen({ navigation }) {
         label="Nome do Exercício"
         placeholder="Ex: Supino Reto"
         value={exercise.name}
-        onChangeText={(value) => updateExercise(exercise.id, "name", value)}
+        onChangeText={(text) => {
+          updateExercise(exercise.id, "name", text);
+          clearError(`exercise_${exercise.id}`);
+        }}
         editable={!isSaving}
-        error={formErrors.exerciseNames?.[exercise.id]}
+        error={formErrors[`exercise_${exercise.id}`]}
       />
 
-      <View style={styles.exerciseRow}>
-        <Input
-          label="Séries"
-          placeholder="3"
-          value={exercise.sets}
-          onChangeText={(value) => updateExercise(exercise.id, "sets", value)}
-          keyboardType="numeric"
-          style={styles.smallInput}
-          editable={!isSaving}
-        />
-        <Input
-          label="Repetições"
-          placeholder="12"
-          value={exercise.reps}
-          onChangeText={(value) => updateExercise(exercise.id, "reps", value)}
-          keyboardType="numeric"
-          style={styles.smallInput}
-          editable={!isSaving}
-        />
-        <Input
-          label="Peso (kg)"
-          placeholder="50 ou 50.5"
-          value={exercise.weight_kg}
-          onChangeText={(value) =>
-            updateExercise(exercise.id, "weight_kg", value)
-          }
-          keyboardType="decimal-pad"
-          style={styles.smallInput}
-          editable={!isSaving}
-        />
+      <View style={styles.typeContainer}>
+        <Text style={styles.typeLabel}>Tipo de Exercício</Text>
+        <View style={styles.typeButtons}>
+          {[
+            { value: "strength", label: "Força", icon: "barbell" },
+            { value: "cardio", label: "Cardio", icon: "heart" },
+            { value: "flexibility", label: "Flexibilidade", icon: "body" },
+          ].map((type) => (
+            <TouchableOpacity
+              key={type.value}
+              style={[
+                styles.typeButton,
+                exercise.exercise_type === type.value &&
+                  styles.typeButtonActive,
+                isSaving && styles.typeButtonDisabled,
+              ]}
+              onPress={() =>
+                !isSaving &&
+                updateExercise(exercise.id, "exercise_type", type.value)
+              }
+              disabled={isSaving}
+            >
+              <Ionicons
+                name={type.icon}
+                size={14}
+                color={
+                  exercise.exercise_type === type.value
+                    ? colors.white
+                    : colors.textSecondary
+                }
+              />
+              <Text
+                style={[
+                  styles.typeButtonText,
+                  exercise.exercise_type === type.value &&
+                    styles.typeButtonTextActive,
+                ]}
+              >
+                {type.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       <Input
         label="Notas (opcional)"
         placeholder="Observações sobre o exercício..."
         value={exercise.notes}
-        onChangeText={(value) => updateExercise(exercise.id, "notes", value)}
+        onChangeText={(text) => updateExercise(exercise.id, "notes", text)}
         multiline
         numberOfLines={2}
         editable={!isSaving}
       />
+
+      <View style={styles.setsSection}>
+        <View style={styles.setsHeader}>
+          <Text style={styles.setsTitle}>Séries</Text>
+          <TouchableOpacity
+            onPress={() => addSetToExercise(exercise.id)}
+            style={[
+              styles.addSetButton,
+              isSaving && styles.addSetButtonDisabled,
+            ]}
+            disabled={isSaving}
+          >
+            <Ionicons
+              name="add-circle"
+              size={18}
+              color={isSaving ? colors.gray[300] : colors.primary}
+            />
+            <Text style={[styles.addSetText, isSaving && styles.disabledText]}>
+              Adicionar Série
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.setsHeaderRow}>
+          <Text style={styles.setHeaderText}>Série</Text>
+          <Text style={styles.setHeaderText}>Reps</Text>
+          <Text style={styles.setHeaderText}>Peso</Text>
+          <View style={{ flex: 1 }} />
+        </View>
+
+        {exercise.sets.map((set, setIndex) =>
+          renderExerciseSet(exercise, set, setIndex)
+        )}
+      </View>
     </View>
   );
 
@@ -261,7 +443,6 @@ export default function AddWorkoutScreen({ navigation }) {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
     >
-      {/* Toast Component */}
       <Toast
         visible={toast.visible}
         message={toast.message}
@@ -274,7 +455,7 @@ export default function AddWorkoutScreen({ navigation }) {
       {isSaving && (
         <View style={styles.savingOverlay}>
           <ActivityIndicator size="large" color={colors.white} />
-          <Text style={styles.savingText}>A guardar treino...</Text>
+          <Text style={styles.savingText}>A criar treino...</Text>
         </View>
       )}
 
@@ -285,6 +466,18 @@ export default function AddWorkoutScreen({ navigation }) {
         scrollEnabled={!isSaving}
       >
         <View style={styles.content}>
+          <View style={[globalStyles.card, styles.headerCard]}>
+            <View style={styles.headerContent}>
+              <Ionicons name="add-circle" size={32} color={colors.primary} />
+              <View style={styles.headerText}>
+                <Text style={styles.headerTitle}>Criar Novo Treino</Text>
+                <Text style={styles.headerSubtitle}>
+                  Adicione exercícios e defina suas séries
+                </Text>
+              </View>
+            </View>
+          </View>
+
           <View style={[globalStyles.card, styles.workoutInfoCard]}>
             <Text style={styles.sectionTitle}>Informações do Treino</Text>
 
@@ -301,16 +494,8 @@ export default function AddWorkoutScreen({ navigation }) {
             />
 
             <Input
-              label="Data"
-              placeholder="YYYY-MM-DD"
-              value={workoutDate}
-              onChangeText={setWorkoutDate}
-              editable={!isSaving}
-            />
-
-            <Input
               label="Notas (opcional)"
-              placeholder="Observações gerais sobre o treino..."
+              placeholder="Observações sobre o treino..."
               value={workoutNotes}
               onChangeText={setWorkoutNotes}
               multiline
@@ -321,58 +506,52 @@ export default function AddWorkoutScreen({ navigation }) {
 
           <View style={styles.exercisesSection}>
             <View style={styles.exercisesHeader}>
-              <Text style={styles.sectionTitle}>Exercícios</Text>
+              <Text style={styles.sectionTitle}>
+                Exercícios ({exercises.length})
+              </Text>
               <TouchableOpacity
+                onPress={addExercise}
                 style={[
                   styles.addExerciseButton,
-                  isSaving && styles.disabledButton,
+                  isSaving && styles.addExerciseButtonDisabled,
                 ]}
-                onPress={addExercise}
                 disabled={isSaving}
               >
                 <Ionicons
                   name="add-circle"
-                  size={28}
+                  size={20}
                   color={isSaving ? colors.gray[300] : colors.primary}
                 />
                 <Text
                   style={[
                     styles.addExerciseText,
-                    isSaving && styles.disabledButtonText,
+                    isSaving && styles.disabledText,
                   ]}
                 >
-                  Adicionar
+                  Adicionar Exercício
                 </Text>
               </TouchableOpacity>
             </View>
 
-            {formErrors.exercisesGlobal && (
-              <Text style={[styles.errorText, styles.globalErrorText]}>
-                {formErrors.exercisesGlobal}
-              </Text>
+            {exercises.map((exercise, exerciseIndex) =>
+              renderExercise(exercise, exerciseIndex)
             )}
 
-            {exercises.map((exercise, index) =>
-              renderExercise(exercise, index)
+            {exercises.length === 0 && (
+              <View style={[globalStyles.card, styles.noExercisesCard]}>
+                <Ionicons
+                  name="barbell-outline"
+                  size={48}
+                  color={colors.gray[400]}
+                />
+                <Text style={styles.noExercisesTitle}>
+                  Nenhum exercício adicionado
+                </Text>
+                <Text style={styles.noExercisesText}>
+                  Clique em Adicionar Exercício para começar a criar seu treino
+                </Text>
+              </View>
             )}
-
-            {exercises.length === 0 &&
-              !isSaving &&
-              !formErrors.exercisesGlobal && (
-                <View style={styles.noExercisesContainer}>
-                  <Ionicons
-                    name="fitness-outline"
-                    size={48}
-                    color={colors.gray[400]}
-                  />
-                  <Text style={styles.noExercisesText}>
-                    Nenhum exercício adicionado
-                  </Text>
-                  <Text style={styles.noExercisesSubtext}>
-                    Toque em Adicionar para começar
-                  </Text>
-                </View>
-              )}
           </View>
         </View>
       </ScrollView>
@@ -386,11 +565,11 @@ export default function AddWorkoutScreen({ navigation }) {
           disabled={isSaving}
         />
         <Button
-          title="Guardar Treino"
+          title="Criar Treino"
           onPress={saveWorkout}
           isLoading={isSaving}
           style={styles.saveButton}
-          disabled={isSaving || workoutsHookLoading}
+          disabled={isSaving}
         />
       </View>
     </KeyboardAvoidingView>
@@ -398,13 +577,10 @@ export default function AddWorkoutScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  // Estilos do container principal
   container: {
     flex: 1,
     backgroundColor: colors.background,
   },
-
-  // Overlay de loading
   savingOverlay: {
     position: "absolute",
     top: 0,
@@ -422,28 +598,40 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontWeight: typography.weights.medium,
   },
-
-  // Estilos do scroll
   scrollContainer: {
     flex: 1,
   },
   scrollContentContainer: {
-    paddingBottom: 120, // Espaço para os botões
+    paddingBottom: 120,
   },
   disabledScroll: {
     opacity: 0.6,
   },
-
-  // Conteúdo principal
   content: {
     padding: 20,
   },
-
-  // Cards e seções
-  workoutInfoCard: {
+  headerCard: {
     marginBottom: 20,
   },
-  exercisesSection: {
+  headerContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  headerText: {
+    flex: 1,
+    marginLeft: 15,
+  },
+  headerTitle: {
+    fontSize: typography.sizes.xl,
+    fontWeight: typography.weights.bold,
+    color: colors.text,
+    marginBottom: 2,
+  },
+  headerSubtitle: {
+    fontSize: typography.sizes.md,
+    color: colors.textSecondary,
+  },
+  workoutInfoCard: {
     marginBottom: 20,
   },
   sectionTitle: {
@@ -452,13 +640,14 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: 16,
   },
-
-  // Header dos exercícios
+  exercisesSection: {
+    marginBottom: 20,
+  },
   exercisesHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    marginBottom: 15,
   },
   addExerciseButton: {
     flexDirection: "row",
@@ -467,8 +656,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.primary,
+  },
+  addExerciseButtonDisabled: {
+    backgroundColor: colors.gray[100],
   },
   addExerciseText: {
     color: colors.primary,
@@ -476,15 +666,9 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.medium,
     marginLeft: 6,
   },
-  disabledButton: {
-    backgroundColor: colors.gray[100],
-    borderColor: colors.gray[300],
-  },
-  disabledButtonText: {
+  disabledText: {
     color: colors.gray[400],
   },
-
-  // Cards de exercício
   exerciseCard: {
     marginBottom: 16,
   },
@@ -492,67 +676,142 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 16,
   },
   exerciseTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.semibold,
+    color: colors.text,
+  },
+  removeExerciseButton: {
+    padding: 4,
+  },
+  typeContainer: {
+    marginVertical: 15,
+  },
+  typeLabel: {
+    fontSize: typography.sizes.md,
+    fontWeight: typography.weights.medium,
+    color: colors.text,
+    marginBottom: 10,
+  },
+  typeButtons: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  typeButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.gray[300],
+    backgroundColor: colors.white,
+  },
+  typeButtonActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  typeButtonDisabled: {
+    opacity: 0.6,
+  },
+  typeButtonText: {
+    fontSize: typography.sizes.xs,
+    color: colors.textSecondary,
+    marginLeft: 4,
+  },
+  typeButtonTextActive: {
+    color: colors.white,
+    fontWeight: typography.weights.medium,
+  },
+  setsSection: {
+    marginTop: 15,
+  },
+  setsHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  setsTitle: {
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.semibold,
     color: colors.text,
   },
-  removeButton: {
-    padding: 4,
-  },
-
-  // Row de inputs pequenos
-  exerciseRow: {
+  addSetButton: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  smallInput: {
-    flex: 1,
-  },
-
-  // Estado vazio
-  noExercisesContainer: {
     alignItems: "center",
-    padding: 40,
-    backgroundColor: colors.gray[50],
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.gray[200],
-    borderStyle: "dashed",
+    backgroundColor: colors.primary + "10",
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  addSetButtonDisabled: {
+    backgroundColor: colors.gray[100],
+  },
+  addSetText: {
+    color: colors.primary,
+    fontSize: typography.sizes.xs,
+    marginLeft: 3,
+  },
+  setsHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.gray[200],
+    marginBottom: 5,
+  },
+  setHeaderText: {
+    fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.medium,
+    color: colors.textSecondary,
+    flex: 1,
+    textAlign: "center",
+  },
+  setRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+    gap: 8,
+  },
+  setNumber: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    color: colors.text,
+    minWidth: 25,
+    textAlign: "center",
+    backgroundColor: colors.primary + "10",
+    paddingVertical: 6,
+    borderRadius: 4,
+  },
+  setInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  removeSetButton: {
+    padding: 2,
+  },
+  noExercisesCard: {
+    alignItems: "center",
+    paddingVertical: 40,
+  },
+  noExercisesTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.semibold,
+    color: colors.text,
+    marginTop: 16,
+    marginBottom: 8,
   },
   noExercisesText: {
     fontSize: typography.sizes.md,
-    fontWeight: typography.weights.medium,
-    color: colors.gray[600],
-    marginTop: 12,
+    color: colors.textSecondary,
     textAlign: "center",
+    lineHeight: 20,
   },
-  noExercisesSubtext: {
-    fontSize: typography.sizes.sm,
-    color: colors.gray[500],
-    marginTop: 4,
-    textAlign: "center",
-  },
-
-  // Erros
-  errorText: {
-    fontSize: typography.sizes.sm,
-    color: colors.error,
-    marginTop: 4,
-  },
-  globalErrorText: {
-    backgroundColor: colors.error + "10",
-    padding: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.error + "30",
-    marginBottom: 16,
-  },
-
-  // Botões inferiores
   bottomButtons: {
     position: "absolute",
     bottom: 0,
