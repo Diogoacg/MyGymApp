@@ -397,7 +397,7 @@ export default function WaterTrackingScreen() {
           </View>
         </View>
 
-        {/* Weekly Chart */}
+        {/* Weekly Chart Otimizado */}
         {loading.weekly && weeklyData.length === 0 ? (
           <View style={[globalStyles.card, styles.loadingCard]}>
             <ActivityIndicator size="small" color={colors.primary} />
@@ -407,39 +407,66 @@ export default function WaterTrackingScreen() {
           weeklyData.length > 0 && (
             <View style={[globalStyles.card, styles.weeklyChart]}>
               <Text style={styles.sectionTitle}>Esta Semana</Text>
+
+              {/* Gráfico responsivo */}
               <View style={styles.chartContainer}>
                 {weeklyData.map((day, index) => {
                   const dayProgress = (day.total / currentWaterGoal) * 100;
-                  const barHeight = Math.max(dayProgress, 5);
+                  const barHeight = Math.max(dayProgress, 5); // Altura mínima para visibilidade
+
+                  // Formatação do valor para display compacto
+                  const displayAmount =
+                    day.total >= 1000
+                      ? `${(day.total / 1000).toFixed(1)}L`
+                      : `${day.total}ml`;
+
+                  // Nome do dia abreviado para mobile
+                  const shortDayName = day.dayName.substring(0, 3);
 
                   return (
                     <View key={index} style={styles.dayColumn}>
-                      <Text style={styles.dayAmount}>{day.total}ml</Text>
+                      {/* Valor com formatação inteligente */}
+                      <Text
+                        style={styles.dayAmount}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                      >
+                        {displayAmount}
+                      </Text>
+
+                      {/* Barra de progresso */}
                       <View style={styles.barContainer}>
                         <View
                           style={[
                             styles.bar,
                             {
-                              height: `${barHeight}%`,
+                              height: `${Math.min(barHeight, 100)}%`,
                               backgroundColor: day.isToday
                                 ? colors.primary
+                                : dayProgress >= 100
+                                ? colors.success
                                 : colors.gray[400],
                             },
                           ]}
                         />
                       </View>
+
+                      {/* Label do dia */}
                       <Text
                         style={[
                           styles.dayLabel,
                           day.isToday && styles.todayLabel,
                         ]}
+                        numberOfLines={1}
                       >
-                        {day.dayName}
+                        {shortDayName}
                       </Text>
+
+                      {/* Ícone de conclusão (apenas se meta atingida) */}
                       {dayProgress >= 100 && (
                         <Ionicons
                           name="checkmark-circle"
-                          size={16}
+                          size={12} // Tamanho reduzido
                           color={colors.success}
                           style={styles.dayComplete}
                         />
@@ -447,6 +474,16 @@ export default function WaterTrackingScreen() {
                     </View>
                   );
                 })}
+              </View>
+
+              {/* Legenda opcional para telas pequenas */}
+              <View style={styles.chartLegend}>
+                <Text style={styles.legendText}>
+                  Meta diária:{" "}
+                  {currentWaterGoal >= 1000
+                    ? `${(currentWaterGoal / 1000).toFixed(1)}L`
+                    : `${currentWaterGoal}ml`}
+                </Text>
               </View>
             </View>
           )
@@ -711,18 +748,108 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     minHeight: 4,
   },
+  // 📊 **GRÁFICO SEMANAL OTIMIZADO PARA MOBILE**
+  weeklyChart: {
+    marginHorizontal: 20,
+    marginBottom: 20,
+    paddingHorizontal: 15, // Padding interno para melhor espaçamento
+  },
+
+  chartContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between", // Mudou de space-around para space-between
+    alignItems: "flex-end",
+    height: 140, // Altura reduzida para mobile
+    paddingTop: 15,
+    paddingHorizontal: 5, // Padding horizontal para as colunas
+  },
+
+  dayColumn: {
+    alignItems: "center",
+    flex: 1,
+    minWidth: 40, // Largura mínima garantida
+    maxWidth: 50, // Largura máxima para não ficar muito largo
+  },
+
+  // 📱 **VALORES OTIMIZADOS PARA MOBILE**
+  dayAmount: {
+    fontSize: 10, // Tamanho menor para caber melhor
+    color: colors.text,
+    fontWeight: typography?.weights?.medium || "500",
+    marginBottom: 4,
+    textAlign: "center",
+    // Quebra de linha se necessário
+    numberOfLines: 1,
+    adjustsFontSizeToFit: true,
+  },
+
+  barContainer: {
+    height: 80, // Altura reduzida de 100 para 80
+    width: 16, // Largura reduzida de 20 para 16
+    backgroundColor: colors.gray?.[200] || "#e5e7eb",
+    borderRadius: 8, // Raio menor
+    justifyContent: "flex-end",
+    overflow: "hidden",
+    marginBottom: 6,
+    marginHorizontal: 2, // Espaçamento horizontal entre barras
+  },
+
+  bar: {
+    width: "100%",
+    borderRadius: 8,
+    minHeight: 3, // Altura mínima reduzida
+  },
+
+  // 🏷️ **LABELS DOS DIAS OTIMIZADOS**
   dayLabel: {
-    fontSize: typography?.sizes?.xs || 12,
+    fontSize: 9, // Tamanho bem pequeno para caber
     color: colors.textSecondary,
     fontWeight: typography?.weights?.medium || "500",
+    textAlign: "center",
+    marginTop: 2,
+    // Garantir que não quebra
+    numberOfLines: 1,
   },
+
   todayLabel: {
     color: colors.primary,
     fontWeight: typography?.weights?.bold || "bold",
+    fontSize: 10, // Ligeiramente maior para destaque
   },
+
   dayComplete: {
-    marginTop: 2,
+    marginTop: 1,
+    alignSelf: "center",
   },
+
+  // 📊 **VERSÃO ALTERNATIVA PARA TELAS MUITO PEQUENAS**
+  compactChart: {
+    height: 120,
+    paddingTop: 10,
+  },
+
+  compactDayColumn: {
+    alignItems: "center",
+    flex: 1,
+    paddingHorizontal: 1,
+  },
+
+  compactBarContainer: {
+    height: 60,
+    width: 12,
+    borderRadius: 6,
+    marginBottom: 4,
+  },
+
+  compactDayAmount: {
+    fontSize: 8,
+    marginBottom: 2,
+  },
+
+  compactDayLabel: {
+    fontSize: 8,
+  },
+
   logsContainer: {
     marginHorizontal: 20,
     marginBottom: 20,
@@ -802,5 +929,18 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: "center",
     lineHeight: 22,
+  },
+  chartLegend: {
+    marginTop: 15,
+    paddingTop: 15,
+    borderTopWidth: 1,
+    borderTopColor: colors.gray?.[200] || "#e5e7eb",
+    alignItems: "center",
+  },
+
+  legendText: {
+    fontSize: typography?.sizes?.xs || 11,
+    color: colors.textSecondary,
+    fontWeight: typography?.weights?.medium || "500",
   },
 });

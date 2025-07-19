@@ -519,7 +519,7 @@ export default function DashboardScreen({ navigation }) {
                   color={getWorkoutColor()}
                   style={styles.cardIcon}
                 />
-                <Text style={styles.cardTitle}>Treinos</Text>
+                <Text style={styles.cardTitle}>Treinos Semanais</Text>
               </View>
 
               {workoutsLoading && !refreshing ? (
