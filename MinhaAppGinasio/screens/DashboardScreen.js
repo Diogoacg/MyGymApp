@@ -382,9 +382,10 @@ export default function DashboardScreen({ navigation }) {
     return "fitness-outline";
   };
 
+  // ...existing code...
+
   return (
     <View style={styles.container}>
-      {/* Toast para feedback */}
       <Toast
         visible={toast.visible}
         message={toast.message}
@@ -402,12 +403,7 @@ export default function DashboardScreen({ navigation }) {
               refreshing={refreshing}
               onRefresh={onRefresh}
               tintColor={colors.primary}
-              colors={[colors.primary, colors.secondary]}
-              progressBackgroundColor={colors.white}
-              title="Puxe para atualizar"
-              titleColor={colors.textSecondary}
-              progressViewOffset={0}
-              enabled={true}
+              colors={[colors.primary]}
             />
           ) : undefined
         }
@@ -415,95 +411,71 @@ export default function DashboardScreen({ navigation }) {
         contentContainerStyle={
           Platform.OS === "web" ? styles.webContent : undefined
         }
-        scrollEventThrottle={16}
-        contentInsetAdjustmentBehavior="automatic"
       >
-        {/* Header com indicação de dados carregados */}
-        <Animated.View style={[styles.header, { opacity: fadeAnimation }]}>
+        {/* Header Simples */}
+        <Animated.View
+          style={[styles.modernHeader, { opacity: fadeAnimation }]}
+        >
           <View style={styles.headerContent}>
-            <View style={styles.greetingContainer}>
+            <View style={styles.userSection}>
               <Text style={styles.greeting}>
                 Olá,{" "}
                 {user?.user_metadata?.full_name?.split(" ")[0] ||
                   user?.email?.split("@")[0] ||
                   "Utilizador"}
-                ! 👋
+                !
               </Text>
-              <Text style={styles.date}>
+              <Text style={styles.dateText}>
                 {new Date().toLocaleDateString("pt-PT", {
                   weekday: "long",
                   day: "numeric",
                   month: "long",
                 })}
               </Text>
-              {/* 🐛 Indicador melhorado para debug */}
-              {__DEV__ && (
-                <View style={styles.debugContainer}>
-                  <Text style={styles.platformIndicator}>
-                    {Platform.OS} | Treinos: {weeklyWorkouts}/{workouts.length}{" "}
-                    | Loading: {workoutsLoading ? "Y" : "N"} | User:{" "}
-                    {userId ? "Y" : "N"}
-                  </Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.headerIcon}>
-              <Ionicons name="person-circle" size={48} color={colors.primary} />
             </View>
           </View>
-
-          {/* Indicador de atualização */}
-          {(refreshing || workoutsLoading || isInitialLoad) && (
-            <View style={styles.refreshIndicator}>
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.refreshText}>
-                {isInitialLoad
-                  ? "Carregando dados iniciais..."
-                  : workoutsLoading
-                  ? "Carregando treinos..."
-                  : "Atualizando dados..."}
-              </Text>
-            </View>
-          )}
         </Animated.View>
 
-        {/* Stats Cards */}
+        {/* Cards Principais */}
         <Animated.View
-          style={[styles.statsContainer, { opacity: fadeAnimation }]}
+          style={[styles.cardsContainer, { opacity: fadeAnimation }]}
         >
-          {/* Water Card */}
-          <View style={[globalStyles.card, styles.statCard, styles.waterCard]}>
-            <View style={styles.cardHeader}>
-              <Ionicons
-                name="water"
-                size={28}
-                color={getWaterProgressColor()}
-              />
-              <Text style={styles.cardTitle}>Hidratação</Text>
-            </View>
-
-            {(waterLoading.today || waterLoading.settings) && !refreshing ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={styles.loadingText}>Carregando...</Text>
+          <View style={styles.cardRow}>
+            {/* Card Água */}
+            <View style={[styles.card, styles.cardHalf]}>
+              <View style={styles.cardHeader}>
+                <Ionicons
+                  name="water"
+                  size={24}
+                  color={getWaterProgressColor()}
+                  style={styles.cardIcon}
+                />
+                <Text style={styles.cardTitle}>Hidratação</Text>
               </View>
-            ) : (
-              <>
-                <Text
-                  style={[
-                    styles.statNumber,
-                    { color: getWaterProgressColor() },
-                  ]}
-                >
-                  {todayIntake}ml
-                </Text>
-                <Text style={styles.statLabel}>Meta: {currentWaterGoal}ml</Text>
 
-                <View style={styles.progressContainer}>
-                  <View style={styles.progressBarBackground}>
+              {waterLoading.today && !refreshing ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.loadingText}>Carregando...</Text>
+                </View>
+              ) : (
+                <>
+                  <Text
+                    style={[
+                      styles.mainValue,
+                      { color: getWaterProgressColor() },
+                    ]}
+                  >
+                    {todayIntake}ml
+                  </Text>
+                  <Text style={styles.goalText}>
+                    Meta: {currentWaterGoal}ml
+                  </Text>
+
+                  <View style={styles.progressBar}>
                     <Animated.View
                       style={[
-                        styles.progressBar,
+                        styles.progressFill,
                         {
                           width: waterProgressAnimation.interpolate({
                             inputRange: [0, 1],
@@ -514,73 +486,65 @@ export default function DashboardScreen({ navigation }) {
                       ]}
                     />
                   </View>
+
                   <Text
                     style={[
-                      styles.progressText,
+                      styles.progressPercent,
                       { color: getWaterProgressColor() },
                     ]}
                   >
                     {Math.round(progressPercentage)}%
                   </Text>
-                </View>
 
-                {progressPercentage >= 100 && (
-                  <View style={styles.achievementBadge}>
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={16}
-                      color={colors.success}
-                    />
-                    <Text style={styles.achievementText}>Meta atingida!</Text>
-                  </View>
-                )}
-              </>
-            )}
-          </View>
-
-          {/* Workout Card com melhor indicação de loading */}
-          <View
-            style={[globalStyles.card, styles.statCard, styles.workoutCard]}
-          >
-            <View style={styles.cardHeader}>
-              <Ionicons
-                name={getWorkoutIcon()}
-                size={28}
-                color={getWorkoutColor()}
-              />
-              <Text style={styles.cardTitle}>Treinos</Text>
-              {/* Indicador de loading para treinos */}
-              {(workoutsLoading || isInitialLoad) && (
-                <ActivityIndicator
-                  size="small"
-                  color={colors.secondary}
-                  style={{ marginLeft: 8 }}
-                />
+                  {progressPercentage >= 100 && (
+                    <View style={styles.achievementBadge}>
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={12}
+                        color={colors.success}
+                      />
+                      <Text style={styles.achievementText}>Meta atingida!</Text>
+                    </View>
+                  )}
+                </>
               )}
             </View>
 
-            {(workoutsLoading || isInitialLoad) && !refreshing ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color={colors.secondary} />
-                <Text style={styles.loadingText}>
-                  {isInitialLoad ? "Carregando..." : "Carregando treinos..."}
-                </Text>
+            {/* Card Treinos */}
+            <View style={[styles.card, styles.cardHalf]}>
+              <View style={styles.cardHeader}>
+                <Ionicons
+                  name={getWorkoutIcon()}
+                  size={24}
+                  color={getWorkoutColor()}
+                  style={styles.cardIcon}
+                />
+                <Text style={styles.cardTitle}>Treinos</Text>
               </View>
-            ) : (
-              <>
-                <Text style={[styles.statNumber, { color: getWorkoutColor() }]}>
-                  {weeklyWorkouts}
-                </Text>
-                <Text style={styles.statLabel}>Esta semana</Text>
 
-                <View style={styles.workoutProgress}>
+              {workoutsLoading && !refreshing ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={colors.secondary} />
+                  <Text style={styles.loadingText}>Carregando...</Text>
+                </View>
+              ) : (
+                <>
+                  <Text
+                    style={[styles.mainValue, { color: getWorkoutColor() }]}
+                  >
+                    {weeklyWorkouts}
+                  </Text>
+                  <Text style={styles.goalText}>
+                    Meta: {currentWorkoutGoal} treinos
+                  </Text>
+
                   <View style={styles.workoutDots}>
                     {[...Array(currentWorkoutGoal)].map((_, index) => (
                       <View
                         key={index}
                         style={[
-                          styles.workoutDot,
-                          index < weeklyWorkouts && styles.workoutDotActive,
+                          styles.dot,
+                          index < weeklyWorkouts && styles.dotActive,
                           {
                             backgroundColor:
                               index < weeklyWorkouts
@@ -591,64 +555,37 @@ export default function DashboardScreen({ navigation }) {
                       />
                     ))}
                   </View>
+
                   <Text
                     style={[
-                      styles.workoutGoalText,
+                      styles.progressPercent,
                       { color: getWorkoutColor() },
                     ]}
                   >
-                    {weeklyWorkouts >= currentWorkoutGoal
-                      ? "Meta atingida! 🎉"
-                      : `Meta: ${currentWorkoutGoal} treinos`}
+                    {Math.round(workoutProgressPercentage)}%
                   </Text>
 
-                  {/* Barra de progresso para treinos */}
-                  <View style={[styles.progressContainer, { marginTop: 8 }]}>
-                    <View style={styles.progressBarBackground}>
-                      <Animated.View
-                        style={[
-                          styles.progressBar,
-                          {
-                            width: workoutProgressAnimation.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: ["0%", "100%"],
-                            }),
-                            backgroundColor: getWorkoutColor(),
-                          },
-                        ]}
+                  {workoutProgressPercentage >= 100 && (
+                    <View style={styles.achievementBadge}>
+                      <Ionicons
+                        name="trophy"
+                        size={12}
+                        color={colors.success}
                       />
+                      <Text style={styles.achievementText}>
+                        Objetivo cumprido!
+                      </Text>
                     </View>
-                    <Text
-                      style={[
-                        styles.progressText,
-                        { color: getWorkoutColor() },
-                      ]}
-                    >
-                      {Math.round(workoutProgressPercentage)}%
-                    </Text>
-                  </View>
-                </View>
-
-                {workoutProgressPercentage >= 100 && (
-                  <View style={styles.achievementBadge}>
-                    <Ionicons name="trophy" size={16} color={colors.success} />
-                    <Text style={styles.achievementText}>
-                      Objetivo cumprido! 🏆
-                    </Text>
-                  </View>
-                )}
-              </>
-            )}
+                  )}
+                </>
+              )}
+            </View>
           </View>
         </Animated.View>
 
-        {/* Quick Water Actions */}
+        {/* Botões de Água Rápida */}
         <Animated.View
-          style={[
-            globalStyles.card,
-            styles.quickWaterCard,
-            { opacity: fadeAnimation },
-          ]}
+          style={[styles.waterButtonsSection, { opacity: fadeAnimation }]}
         >
           <Text style={styles.sectionTitle}>Água Rápida</Text>
           <View style={styles.waterButtons}>
@@ -662,26 +599,20 @@ export default function DashboardScreen({ navigation }) {
                 ]}
                 onPress={() => quickAddWater(amount)}
                 disabled={waterLoading.action || refreshing}
-                activeOpacity={0.7}
+                activeOpacity={0.8}
               >
-                <View style={styles.waterButtonContent}>
-                  <Ionicons name="water" size={20} color={colors.white} />
-                  <Text style={styles.waterButtonText}>
-                    {waterLoading.action ? "..." : `+${amount}ml`}
-                  </Text>
-                </View>
+                <Ionicons name="water" size={18} color={colors.white} />
+                <Text style={styles.waterButtonText}>
+                  {waterLoading.action ? "..." : `+${amount}ml`}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
         </Animated.View>
 
-        {/* Quick Actions */}
+        {/* Ações Rápidas */}
         <Animated.View
-          style={[
-            globalStyles.card,
-            styles.quickActionsCard,
-            { opacity: fadeAnimation },
-          ]}
+          style={[styles.actionsSection, { opacity: fadeAnimation }]}
         >
           <Text style={styles.sectionTitle}>Ações Rápidas</Text>
 
@@ -693,18 +624,29 @@ export default function DashboardScreen({ navigation }) {
             activeOpacity={0.8}
             disabled={refreshing}
           >
-            <View style={styles.actionIcon}>
-              <Ionicons name="add-circle" size={24} color={colors.white} />
+            <View
+              style={[
+                styles.actionIcon,
+                { backgroundColor: colors.white + "20" },
+              ]}
+            >
+              <Ionicons name="add-circle" size={20} color={colors.white} />
             </View>
             <View style={styles.actionContent}>
-              <Text style={styles.actionTitle}>Novo Treino</Text>
-              <Text style={styles.actionSubtitle}>Criar um novo treino</Text>
+              <Text style={[styles.actionTitle, styles.primaryActionTitle]}>
+                Novo Treino
+              </Text>
+              <Text
+                style={[styles.actionSubtitle, styles.primaryActionSubtitle]}
+              >
+                Criar um novo treino
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.white} />
+            <Ionicons name="chevron-forward" size={16} color={colors.white} />
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionButton, styles.successAction]}
+            style={styles.actionButton}
             onPress={() => navigation.navigate("Water")}
             activeOpacity={0.8}
             disabled={refreshing}
@@ -712,26 +654,21 @@ export default function DashboardScreen({ navigation }) {
             <View
               style={[styles.actionIcon, { backgroundColor: colors.success }]}
             >
-              <Ionicons name="water" size={24} color={colors.white} />
+              <Ionicons name="water" size={20} color={colors.white} />
             </View>
             <View style={styles.actionContent}>
-              <Text style={[styles.actionTitle, { color: colors.success }]}>
-                Registar Água
-              </Text>
-              <Text
-                style={[
-                  styles.actionSubtitle,
-                  { color: colors.success + "80" },
-                ]}
-              >
-                Acompanhar hidratação
-              </Text>
+              <Text style={styles.actionTitle}>Registar Água</Text>
+              <Text style={styles.actionSubtitle}>Acompanhar hidratação</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.success} />
+            <Ionicons
+              name="chevron-forward"
+              size={16}
+              color={colors.textSecondary}
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.actionButton, styles.secondaryAction]}
+            style={styles.actionButton}
             onPress={() =>
               navigation.navigate("Workouts", { screen: "WorkoutList" })
             }
@@ -741,25 +678,16 @@ export default function DashboardScreen({ navigation }) {
             <View
               style={[styles.actionIcon, { backgroundColor: colors.secondary }]}
             >
-              <Ionicons name="list" size={24} color={colors.white} />
+              <Ionicons name="list" size={20} color={colors.white} />
             </View>
             <View style={styles.actionContent}>
-              <Text style={[styles.actionTitle, { color: colors.secondary }]}>
-                Ver Treinos
-              </Text>
-              <Text
-                style={[
-                  styles.actionSubtitle,
-                  { color: colors.secondary + "80" },
-                ]}
-              >
-                Histórico completo
-              </Text>
+              <Text style={styles.actionTitle}>Ver Treinos</Text>
+              <Text style={styles.actionSubtitle}>Histórico completo</Text>
             </View>
             <Ionicons
               name="chevron-forward"
-              size={20}
-              color={colors.secondary}
+              size={16}
+              color={colors.textSecondary}
             />
           </TouchableOpacity>
         </Animated.View>
@@ -767,284 +695,345 @@ export default function DashboardScreen({ navigation }) {
     </View>
   );
 }
-
-// ...existing styles...
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
   },
-  // 🌐 **ESTILOS ESPECÍFICOS PARA WEB**
-  webRefreshContainer: {
-    backgroundColor: colors.white,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.gray?.[200] || "#e5e7eb",
-  },
-  webRefreshButton: {
-    alignSelf: "center",
-    minWidth: 150,
-  },
-  webScrollView: {
-    maxWidth: 600, // Limitar largura em telas grandes
-    alignSelf: "center",
-    width: "100%",
-  },
-  webContent: {
-    paddingHorizontal: Platform.OS === "web" ? 20 : 0,
-  },
-  header: {
-    backgroundColor: colors.white,
-    paddingHorizontal: 20,
-    paddingTop: 20,
+
+  // 🎯 **HEADER SIMPLES E MODERNO**
+  modernHeader: {
+    backgroundColor: colors.primary,
+    paddingTop: Platform.OS === "ios" ? 50 : 30,
     paddingBottom: 25,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
     marginBottom: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
   },
+
   headerContent: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginBottom: 20,
   },
-  greetingContainer: {
+
+  // 👤 **PERFIL SIMPLES**
+  userSection: {
     flex: 1,
   },
+
   greeting: {
-    fontSize: typography?.sizes?.xxl || 24,
+    fontSize: typography?.sizes?.xl || 22,
     fontWeight: typography?.weights?.bold || "bold",
-    color: colors.text,
-    marginBottom: 5,
+    color: colors.white,
+    marginBottom: 4,
   },
-  date: {
-    fontSize: typography?.sizes?.md || 16,
-    color: colors.textSecondary,
+
+  dateText: {
+    fontSize: typography?.sizes?.sm || 14,
+    color: colors.white + "80",
     textTransform: "capitalize",
   },
-  // 🐛 **INDICADOR DE PLATAFORMA PARA DEBUG**
-  platformIndicator: {
-    fontSize: typography?.sizes?.xs || 12,
-    color: colors.primary,
-    marginTop: 5,
-    fontWeight: "bold",
-    backgroundColor: colors.primary + "20",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
-    alignSelf: "flex-start",
-  },
-  headerIcon: {
-    marginLeft: 15,
-  },
-  refreshIndicator: {
+
+  // ⚡ **BOTÕES DE AÇÃO SIMPLES**
+  headerButtons: {
     flexDirection: "row",
-    alignItems: "center",
+    gap: 12,
+  },
+
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.white + "20",
     justifyContent: "center",
-    marginTop: 15,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.gray?.[200] || "#e5e7eb",
+    alignItems: "center",
   },
-  refreshText: {
-    fontSize: typography?.sizes?.sm || 14,
-    color: colors.textSecondary,
-    marginLeft: 8,
-    fontStyle: "italic",
+
+  // 📊 **STATS RESUMIDOS**
+  quickStats: {
+    flexDirection: "row",
+    backgroundColor: colors.white + "15",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
   },
-  statsContainer: {
-    flexDirection: Platform.OS === "web" ? "column" : "row",
+
+  statItem: {
+    flex: 1,
+    alignItems: "center",
+  },
+
+  statNumber: {
+    fontSize: typography?.sizes?.lg || 18,
+    fontWeight: typography?.weights?.bold || "bold",
+    color: colors.white,
+    marginBottom: 2,
+  },
+
+  statLabel: {
+    fontSize: typography?.sizes?.xs || 11,
+    color: colors.white + "70",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+
+  statDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: colors.white + "30",
+    marginHorizontal: 8,
+  },
+
+  // 📱 **CARDS PRINCIPAIS SIMPLIFICADOS**
+  cardsContainer: {
     paddingHorizontal: 20,
+    gap: 15,
     marginBottom: 20,
+  },
+
+  card: {
+    backgroundColor: colors.white,
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: colors.gray?.[100] || "#f3f4f6",
+  },
+
+  cardRow: {
+    flexDirection: "row",
     gap: 15,
   },
-  statCard: {
-    flex: Platform.OS === "web" ? undefined : 1,
-    paddingVertical: 25,
-    paddingHorizontal: 20,
+
+  cardHalf: {
+    flex: 1,
   },
+
+  // 💧 **CARD DE ÁGUA**
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 15,
+    marginBottom: 12,
   },
+
+  cardIcon: {
+    marginRight: 8,
+  },
+
   cardTitle: {
     fontSize: typography?.sizes?.md || 16,
     fontWeight: typography?.weights?.semibold || "600",
     color: colors.text,
-    marginLeft: 8,
   },
-  loadingContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 15,
-  },
-  loadingText: {
-    fontSize: typography?.sizes?.sm || 14,
-    color: colors.textSecondary,
-    marginLeft: 8,
-  },
-  statNumber: {
-    fontSize: 32,
+
+  mainValue: {
+    fontSize: 28,
     fontWeight: typography?.weights?.bold || "bold",
-    marginBottom: 5,
+    marginBottom: 4,
   },
-  statLabel: {
+
+  goalText: {
     fontSize: typography?.sizes?.sm || 14,
     color: colors.textSecondary,
-    marginBottom: 15,
+    marginBottom: 12,
   },
-  progressContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  progressBarBackground: {
-    flex: 1,
-    height: 8,
-    backgroundColor: colors.gray?.[200] || "#e5e7eb",
-    borderRadius: 4,
-    marginRight: 10,
-    overflow: "hidden",
-  },
+
+  // 📊 **BARRA DE PROGRESSO SIMPLES**
   progressBar: {
+    height: 6,
+    backgroundColor: colors.gray?.[200] || "#e5e7eb",
+    borderRadius: 3,
+    overflow: "hidden",
+    marginBottom: 8,
+  },
+
+  progressFill: {
     height: "100%",
-    borderRadius: 4,
+    borderRadius: 3,
   },
-  progressText: {
+
+  progressPercent: {
     fontSize: typography?.sizes?.sm || 14,
-    fontWeight: typography?.weights?.semibold || "600",
-    minWidth: 35,
+    fontWeight: typography?.weights?.medium || "500",
+    textAlign: "center",
   },
+
+  // 🏆 **BADGE DE CONQUISTA**
   achievementBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: colors.success + "20",
+    backgroundColor: colors.success + "10",
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 12,
+    borderRadius: 8,
     alignSelf: "flex-start",
+    marginTop: 8,
   },
+
   achievementText: {
-    fontSize: typography?.sizes?.xs || 12,
+    fontSize: typography?.sizes?.xs || 11,
     color: colors.success,
     fontWeight: typography?.weights?.medium || "500",
     marginLeft: 4,
   },
-  workoutProgress: {
-    alignItems: "center",
-  },
+
+  // 🏋️ **DOTS DE TREINO**
   workoutDots: {
     flexDirection: "row",
+    justifyContent: "center",
     marginBottom: 8,
     gap: 6,
   },
-  debugContainer: {
-    marginTop: 5,
-  },
-  workoutDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     backgroundColor: colors.gray?.[300] || "#d1d5db",
   },
-  workoutDotActive: {
+
+  dotActive: {
+    backgroundColor: colors.success,
     transform: [{ scale: 1.2 }],
   },
-  workoutGoalText: {
-    fontSize: typography?.sizes?.xs || 12,
-    fontWeight: typography?.weights?.medium || "500",
-    marginBottom: 8,
-  },
-  quickWaterCard: {
-    marginHorizontal: 20,
+
+  // 💧 **BOTÕES DE ÁGUA RÁPIDA**
+  waterButtonsSection: {
+    paddingHorizontal: 20,
     marginBottom: 20,
   },
+
   sectionTitle: {
     fontSize: typography?.sizes?.lg || 18,
     fontWeight: typography?.weights?.bold || "bold",
     color: colors.text,
-    marginBottom: 20,
+    marginBottom: 15,
   },
+
   waterButtons: {
     flexDirection: "row",
-    gap: 12,
+    gap: 10,
   },
+
   waterButton: {
     flex: 1,
     backgroundColor: colors.primary,
     borderRadius: 12,
-    paddingVertical: 15,
-    paddingHorizontal: 12,
+    paddingVertical: 14,
     alignItems: "center",
-    shadowColor: "#000",
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
   },
+
   waterButtonDisabled: {
     opacity: 0.6,
   },
-  waterButtonContent: {
-    alignItems: "center",
-  },
+
   waterButtonText: {
     color: colors.white,
     fontSize: typography?.sizes?.sm || 14,
     fontWeight: typography?.weights?.semibold || "600",
-    marginTop: 5,
+    marginTop: 4,
   },
-  quickActionsCard: {
-    marginHorizontal: 20,
+
+  // 🎯 **AÇÕES RÁPIDAS SIMPLIFICADAS**
+  actionsSection: {
+    paddingHorizontal: 20,
     marginBottom: 20,
   },
+
   actionButton: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
     backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
     borderWidth: 1,
     borderColor: colors.gray?.[200] || "#e5e7eb",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowRadius: 4,
+    elevation: 2,
   },
+
   primaryAction: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  successAction: {
-    backgroundColor: colors.success + "10",
-    borderColor: colors.success + "30",
-  },
-  secondaryAction: {
-    backgroundColor: colors.secondary + "10",
-    borderColor: colors.secondary + "30",
-  },
+
   actionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: colors.primary,
     justifyContent: "center",
     alignItems: "center",
-    marginRight: 15,
+    marginRight: 12,
   },
+
   actionContent: {
     flex: 1,
   },
+
   actionTitle: {
     fontSize: typography?.sizes?.md || 16,
     fontWeight: typography?.weights?.semibold || "600",
-    color: colors.white,
+    color: colors.text,
     marginBottom: 2,
   },
+
   actionSubtitle: {
     fontSize: typography?.sizes?.sm || 14,
+    color: colors.textSecondary,
+  },
+
+  primaryActionTitle: {
+    color: colors.white,
+  },
+
+  primaryActionSubtitle: {
     color: colors.white + "80",
+  },
+
+  // 🔄 **LOADING SIMPLES**
+  loadingContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+  },
+
+  loadingText: {
+    fontSize: typography?.sizes?.sm || 14,
+    color: colors.textSecondary,
+    marginLeft: 8,
+  },
+
+  // 🌐 **WEB RESPONSIVO**
+  webScrollView: {
+    maxWidth: 600,
+    alignSelf: "center",
+    width: "100%",
+  },
+
+  webContent: {
+    paddingHorizontal: Platform.OS === "web" ? 20 : 0,
   },
 });
